@@ -1,0 +1,7 @@
+/build/
+/.mygo/
+mygo_windows_*.syso
+
+# 本地构建产物与系统文件
+/toolbox
+.DS_Store

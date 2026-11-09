@@ -1,0 +1,6 @@
+{
+  "name": "toolbox",
+  "identifier": "com.example.toolbox",
+  "version": "1.0.0",
+  "out": "build"
+}
