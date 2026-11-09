@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/updater"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -31,11 +32,18 @@ type app struct {
 	recording string
 
 	settingsSaving bool
-	updateChecking bool
+
+	// updatesOn 表示更新插件已装配（main 里 mygo.Use 之后才为 true）。
+	// 单元测试不跑 main，靠它跳过更新相关的调用。
+	updatesOn bool
+	// available 是更新插件发现的新版本号，空表示没有可用更新。
+	available string
 
 	toastMsg string
 
 	registered map[string]string
+
+	capture *captureSession
 }
 
 type sectionItem struct {
@@ -530,14 +538,14 @@ func (a *app) settingsSection(c *ui.Context) {
 		ui.Column(c).Grow(1).Gap(4).Children(func() {
 			ui.Text(c, "TOOLBOX DESKTOP").FontSize(11).Bold().TextColor(colTextMuted).LetterSpacing(1.4)
 			ui.Text(c, "版本 "+appVersion).FontSize(25).Bold()
-			ui.Text(c, "更新清单来自 GitHub Release，下载后会校验 SHA256 再安装。").FontSize(13).TextColor(colTextSoft)
+			ui.Text(c, a.updateHint()).FontSize(13).TextColor(colTextSoft)
 		})
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-			if primaryBtn(c, "检查更新").Disabled(a.updateChecking).Clicked() {
+			if primaryBtn(c, "检查更新").Clicked() {
 				a.checkUpdate()
 			}
 			if secondaryBtn(c, "查看 Releases").Clicked() {
-				_ = mygo.Shell.OpenExternal("https://github.com")
+				_ = mygo.Shell.OpenExternal(releasePageURL)
 			}
 		})
 	})
@@ -789,10 +797,39 @@ func (a *app) saveSettingsUI() {
 	a.toast("设置已保存")
 }
 
+// checkUpdate 打开更新窗口。真正的检查、下载、签名校验与替换都由
+// mygo 的更新插件完成（updater/native），这里只负责发起。
 func (a *app) checkUpdate() {
-	a.updateChecking = true
-	a.toast("更新检查将于后续阶段接入")
-	a.updateChecking = false
+	if !a.updatesOn {
+		a.toast("开发构建不检查更新，请使用打包后的 App")
+		return
+	}
+	updater.CheckForUpdates()
+}
+
+// updateHint 是更新卡片的一句话说明，跟着检查结果显示。
+func (a *app) updateHint() string {
+	if !a.updatesOn {
+		return "开发构建不检查更新；打包版会从 GitHub Release 校验签名后升级。"
+	}
+	if a.available != "" {
+		return "发现新版本 v" + a.available + "，点击“检查更新”查看说明并安装。"
+	}
+	if t := updater.LastCheck(); !t.IsZero() {
+		return "已是最新版本 · 上次检查 " + t.Local().Format("01-02 15:04")
+	}
+	return "更新来自 GitHub Release，安装前会用内置公钥校验签名。"
+}
+
+// refreshUpdateState 同步插件发现的新版本，并让界面重绘。
+func (a *app) refreshUpdateState() {
+	if !a.updatesOn {
+		return
+	}
+	a.available = updater.AvailableVersion()
+	if a.win != nil {
+		a.win.Update(func() {})
+	}
 }
 
 func (a *app) openLog() {

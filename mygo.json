@@ -2,5 +2,12 @@
   "name": "toolbox",
   "identifier": "com.example.toolbox",
   "version": "1.0.0",
-  "out": "build"
+  "out": "build",
+  "updates": {
+    "publicKey": "pYVqpPOTgfNGfIWcbHh7veS7Bm8c8Ti6ink+1y3TWz0=",
+    "github": "ShakePeng/toolbox"
+  },
+  "macos": {
+    "signingIdentity": "Toolbox Local Dev"
+  }
 }

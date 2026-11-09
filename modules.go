@@ -16,6 +16,8 @@ const (
 	appName     = "Toolbox"
 	appSubtitle = "轻巧的桌面工具箱"
 	appVersion  = "1.0.0"
+	// releasePageURL 是 GitHub 发布页，“查看 Releases”和更新说明都指向它。
+	releasePageURL = "https://github.com/ShakePeng/toolbox/releases"
 )
 
 // PermissionStatus 是插件所需系统权限的快照。
@@ -36,13 +38,6 @@ func permissions() PermissionStatus {
 func (a *app) startTranslation() {
 	a.toast("划词翻译模块将在后续阶段接入")
 	log.Printf("%s: 触发划词翻译（阶段一桩实现）", appName)
-}
-
-// startCapture 触发一次区域截图。阶段一为桩。
-// 阶段二实现：冻结屏幕 -> 框选 -> 标注 -> 复制/保存。
-func (a *app) startCapture() {
-	a.toast("截图标注模块将在后续阶段接入")
-	log.Printf("%s: 触发区域截图（阶段一桩实现）", appName)
 }
 
 // onPermission 打开系统权限设置页（占位，阶段二接入）。

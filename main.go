@@ -5,6 +5,8 @@ import (
 	"runtime"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/updater"
+	updaternative "github.com/egoist/mygo/plugins/updater/native"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -13,6 +15,10 @@ func main() {
 	if !mygo.App.RequestSingleInstanceLock() {
 		return // 已有实例在运行，第二实例会触发 OnSecondInstance 唤起主窗口。
 	}
+	// 更新窗口用原生 UI 版本（本项目没有 webview）。
+	// 没有 updates 配置的开发构建里插件不会真正检查，界面会给出提示。
+	mygo.Use(updaternative.Plugin)
+	a.updatesOn = true
 	mygo.App.SetName(appName)
 	// 关窗不退出：应用常驻托盘。
 	mygo.App.OnWindowAllClosed(func() {})
@@ -49,7 +55,18 @@ func (a *app) ready() {
 
 	a.setUpTray()
 	a.registerHotkeys()
+	a.watchUpdates()
 	a.win.Show()
+}
+
+// watchUpdates 把插件检查到的新版本同步到界面（检查在后台进行，
+// 主线程重绘要靠这里推一下）。
+func (a *app) watchUpdates() {
+	if !a.updatesOn {
+		return
+	}
+	updater.OnChange(a.refreshUpdateState)
+	a.refreshUpdateState()
 }
 
 func (a *app) showMain() {
@@ -83,14 +100,18 @@ func (a *app) setUpTray() {
 	}
 	a.tray = tray
 
-	menu := mygo.NewMenu([]*mygo.MenuItem{
+	items := []*mygo.MenuItem{
 		{Label: "打开 Toolbox", Click: func(*mygo.MenuItem, *mygo.Window) { a.showMain() }},
 		mygo.Separator(),
 		{Label: "划词翻译", Click: func(*mygo.MenuItem, *mygo.Window) { a.startTranslation() }},
 		{Label: "区域截图", Click: func(*mygo.MenuItem, *mygo.Window) { a.startCapture() }},
 		mygo.Separator(),
-		{Role: mygo.RoleQuit},
-	})
+	}
+	if a.updatesOn {
+		items = append(items, updater.MenuItem(), mygo.Separator())
+	}
+	items = append(items, &mygo.MenuItem{Role: mygo.RoleQuit})
+	menu := mygo.NewMenu(items)
 
 	if runtime.GOOS == "linux" {
 		// AppIndicator 只支持菜单。

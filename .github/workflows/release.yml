@@ -1,0 +1,61 @@
+name: Release
+
+# 推 v* tag 触发：先建草稿 release，再逐平台构建并上传（含更新清单），最后发布。
+# 版本号必须和 mygo.json 的 version 一致，否则直接失败，避免发错版本。
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # 建草稿 release 并上传产物
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  draft-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验 tag 与 mygo.json 的版本号一致
+        run: test "$GITHUB_REF_NAME" = "v$(jq -r .version mygo.json)"
+
+      - name: 创建草稿 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --draft --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+          fi
+
+  build:
+    needs: draft-release
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # 没有 Developer ID 证书时用 ad-hoc 签名（覆盖 mygo.json 里的本地自签身份）。
+      # 用户下载后首次启动需要「右键 → 打开」或在终端执行一次
+      # xattr -dr com.apple.quarantine。配上证书后把这行换成 -sign "<Developer ID ...>"。
+      - name: 构建并上传（app + dmg + 签名更新包）
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
+        run: go tool mygo build -platform "darwin/arm64,darwin/amd64" -sign - -upload
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: 发布草稿
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
