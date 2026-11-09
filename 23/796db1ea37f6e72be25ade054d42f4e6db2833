@@ -1,0 +1,29 @@
+go.mod
+  s_da5e8b813d731d::t_500c3496817d5c 7-10
+icons.go
+  s_da5e8b813d731d::t_d2172dd576ef36 30-42
+marks_test.go
+  s_da5e8b813d731d::t_0346418d1ab4bb 1-87
+perm_screen_darwin.go
+  s_da5e8b813d731d::t_c9502ae71786bd 1-37
+perm_screen_other.go
+  s_da5e8b813d731d::t_943938ca161c12 1-6
+scripts/macos-signing.sh
+  s_da5e8b813d731d::t_d7955e3a94e658 1-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "23796db1ea37f6e72be25ade054d42f4e6db2833",
+  "prompts": {},
+  "sessions": {
+    "s_da5e8b813d731d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704537bf-70c0-4d0c-a78d-8104669acf3f",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
