@@ -15,6 +15,10 @@ func main() {
 	if !mygo.App.RequestSingleInstanceLock() {
 		return // 已有实例在运行，第二实例会触发 OnSecondInstance 唤起主窗口。
 	}
+	// 应用文案本身就是中文，但项目没有 i18n 语言目录，mygo 默认会把应用当作
+	// “只写了英文”，于是更新窗口、托盘里的“检查更新”和各状态提示全回落成英文。
+	// 显式声明中文，更新插件自带的 zh-Hans 翻译才会生效。
+	mygo.App.SetLanguages("zh-Hans")
 	// 更新窗口用原生 UI 版本（本项目没有 webview）。
 	// 没有 updates 配置的开发构建里插件不会真正检查，界面会给出提示。
 	mygo.Use(updaternative.Plugin)
