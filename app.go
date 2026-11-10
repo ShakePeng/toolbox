@@ -121,7 +121,7 @@ func (a *app) view(c *ui.Context) {
 	th := sToolsTheme()
 
 	if a.recording != "" && c.Shortcut(0, ui.KeyEscape) {
-		a.recording = ""
+		a.stopRecording()
 	}
 	c.OnShortcut(ui.Cmd, ui.KeyQ, mygo.App.Quit)
 	if !a.sectionVisible(a.section) {
@@ -628,14 +628,24 @@ func (a *app) hotkeyRecorder(c *ui.Context, slot string) {
 			})
 			if recording {
 				if secondaryBtn(c, "取消").Clicked() {
-					a.recording = ""
+					a.stopRecording()
 				}
 				if acc, ok := captureHotkey(c); ok {
 					a.setHotkey(slot, acc)
-					a.recording = ""
+					// 录制期间全局快捷键是注销状态，这里恢复注册；
+					// 录到的新值立即生效，同时落盘，避免重启后回退。
+					a.stopRecording()
+					switch err := a.persist(); {
+					case err != nil:
+						a.toast("保存失败：" + err.Error())
+					case a.settings.Hotkeys.Translate == a.settings.Hotkeys.Screenshot:
+						a.toast("提示：两个插件使用了相同快捷键，可能相互冲突")
+					default:
+						a.toast("快捷键已更新：" + formatHotkey(acc))
+					}
 				}
 			} else if secondaryBtn(c, "录制").Clicked() {
-				a.recording = slot
+				a.startRecording(slot)
 			}
 		})
 	})
@@ -727,9 +737,6 @@ func (a *app) setHotkey(slot, acc string) {
 	} else {
 		a.settings.Hotkeys.Screenshot = acc
 	}
-	if a.settings.Hotkeys.Translate == a.settings.Hotkeys.Screenshot {
-		a.toast("提示：两个插件使用了相同快捷键，可能相互冲突")
-	}
 }
 
 func (a *app) afterFeatureChange(kind string) {
@@ -817,25 +824,64 @@ func (a *app) openLog() {
 }
 
 func (a *app) registerHotkeys() {
-	a.ensureHotkey("translate", a.settings.TranslationEnabled, a.settings.Hotkeys.Translate, a.startTranslation)
-	a.ensureHotkey("screenshot", a.settings.ScreenshotEnabled, a.settings.Hotkeys.Screenshot, a.startCapture)
+	// 录制期间快捷键是刻意注销的；保存设置等路径也会走到这里，
+	// 不能把刚注销的组合键又注册回去。
+	if a.recording != "" {
+		return
+	}
+	var failed []string
+	if err := a.ensureHotkey("translate", a.settings.TranslationEnabled, a.settings.Hotkeys.Translate, a.startTranslation); err != nil {
+		failed = append(failed, a.settings.Hotkeys.Translate)
+	}
+	if err := a.ensureHotkey("screenshot", a.settings.ScreenshotEnabled, a.settings.Hotkeys.Screenshot, a.startCapture); err != nil {
+		failed = append(failed, a.settings.Hotkeys.Screenshot)
+	}
+	if len(failed) > 0 {
+		// 注册失败以前只写日志，用户会以为功能坏了。
+		a.toast("快捷键注册失败：" + strings.Join(failed, "、") + "，可能已被其他程序占用")
+	}
 }
 
-func (a *app) ensureHotkey(slot string, enabled bool, acc string, fn func()) {
+func (a *app) ensureHotkey(slot string, enabled bool, acc string, fn func()) error {
 	if old, ok := a.registered[slot]; ok {
 		mygo.GlobalShortcut.Unregister(old)
 		delete(a.registered, slot)
 	}
 	if !enabled || acc == "" {
-		return
+		return nil
 	}
 	if err := mygo.GlobalShortcut.Register(acc, fn); err != nil {
 		log.Printf("注册快捷键 %s 失败：%v", acc, err)
-		return
+		return err
 	}
 	a.registered[slot] = acc
+	return nil
 }
 
-func (a *app) notifyCaptureError(msg string) {
-	a.toast(strings.TrimSpace(msg))
+// unregisterHotkeys 注销当前所有全局快捷键。
+func (a *app) unregisterHotkeys() {
+	for slot, acc := range a.registered {
+		mygo.GlobalShortcut.Unregister(acc)
+		delete(a.registered, slot)
+	}
+}
+
+// startRecording 进入快捷键录制。
+// 录制期间必须先注销全局快捷键，否则按下当前生效的组合键（如 F1）会被
+// 全局快捷键截走，根本录不进来。
+func (a *app) startRecording(slot string) {
+	if a.recording == slot {
+		return
+	}
+	a.unregisterHotkeys()
+	a.recording = slot
+}
+
+// stopRecording 结束录制并恢复全局快捷键注册。
+func (a *app) stopRecording() {
+	if a.recording == "" {
+		return
+	}
+	a.recording = ""
+	a.registerHotkeys()
 }

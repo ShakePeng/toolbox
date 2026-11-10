@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	_ "embed"
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/draw"
@@ -20,12 +22,22 @@ const (
 	releasePageURL = "https://github.com/ShakePeng/toolbox/releases"
 )
 
-// appVersion 用打包后的版本号（Info.plist），开发构建没有包信息时回退到当前版本。
+//go:embed mygo.json
+var mygoConfigJSON []byte
+
+// appVersion 用打包后的版本号（Info.plist / exe 资源）；开发构建没有
+// 包信息时从编译期嵌入的 mygo.json 读取，避免再手工同步一个版本常量。
 func appVersion() string {
 	if v := mygo.App.Version(); v != "" {
 		return v
 	}
-	return "1.0.6"
+	var cfg struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(mygoConfigJSON, &cfg); err == nil && cfg.Version != "" {
+		return cfg.Version
+	}
+	return "dev"
 }
 
 // PermissionStatus 是插件所需系统权限的快照。
@@ -113,9 +125,4 @@ func trayIcon() []byte {
 	var b bytes.Buffer
 	_ = png.Encode(&b, img)
 	return b.Bytes()
-}
-
-// openAtLogin 读取开机自启状态（兜底 false）。
-func openAtLogin() bool {
-	return mygo.App.OpenAtLogin()
 }

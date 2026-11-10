@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/egoist/mygo"
 )
@@ -44,11 +46,18 @@ func migrateConfig(cfg *Config) {
 	if cfg.SchemaVersion == 0 {
 		cfg.SchemaVersion = 1
 	}
+	defaults := defaultHotkeys()
 	if cfg.Settings.Hotkeys.Translate == "" {
-		cfg.Settings.Hotkeys.Translate = "Alt+D"
+		cfg.Settings.Hotkeys.Translate = defaults.Translate
 	}
 	if cfg.Settings.Hotkeys.Screenshot == "" {
-		cfg.Settings.Hotkeys.Screenshot = "F1"
+		cfg.Settings.Hotkeys.Screenshot = defaults.Screenshot
+	}
+	if runtime.GOOS != "darwin" {
+		// 旧版录制器在 Windows/Linux 上会多写一个 Cmd（= Win 键），
+		// 注册出来的组合键用户按不到，这里迁移掉。
+		cfg.Settings.Hotkeys.Translate = stripLegacyCmd(cfg.Settings.Hotkeys.Translate)
+		cfg.Settings.Hotkeys.Screenshot = stripLegacyCmd(cfg.Settings.Hotkeys.Screenshot)
 	}
 	if cfg.Settings.TargetLang == "" {
 		cfg.Settings.TargetLang = "auto"
@@ -61,8 +70,33 @@ func migrateConfig(cfg *Config) {
 		if p.Credentials == nil {
 			p.Credentials = map[string]string{}
 		}
+		// 早期版本把 OpenAI 的 Base URL 留空，导致只填 API Key 的服务
+		// 标记为“已配置”却无法请求；升级时补上默认地址。
+		if p.Kind == "openai-compatible" && strings.TrimSpace(p.BaseURL) == "" {
+			p.BaseURL = defaultOpenAIBaseURL
+		}
 		p.Configured = providerConfigured(*p)
 	}
+}
+
+// stripLegacyCmd 去掉旧版录制器生成的 Cmd 修饰键。
+// 只匹配完整的 "Cmd"，不会动 "CmdOrCtrl"。
+func stripLegacyCmd(acc string) string {
+	parts := strings.Split(acc, "+")
+	if len(parts) < 2 {
+		return acc
+	}
+	out := parts[:0]
+	for _, p := range parts {
+		if strings.EqualFold(strings.TrimSpace(p), "Cmd") {
+			continue
+		}
+		out = append(out, p)
+	}
+	if len(out) == 0 {
+		return acc
+	}
+	return strings.Join(out, "+")
 }
 
 // saveConfig 原子写入配置：先写临时文件再 rename，避免半截文件。

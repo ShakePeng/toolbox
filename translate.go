@@ -440,19 +440,28 @@ func resolveTargetLang(pref, text string) string {
 	if pref != "" && pref != "auto" {
 		return pref
 	}
-	if containsHan(text) {
+	if isLikelyChinese(text) {
 		return "en"
 	}
 	return "zh-CN"
 }
 
-func containsHan(text string) bool {
+// isLikelyChinese 判断原文是否以中文为主。
+// 不能只看“有没有汉字”：日文几乎都含汉字，直接按汉字判断会把日文
+// 误判成中文、译成英文。出现假名或谚文时按日文/韩文处理。
+func isLikelyChinese(text string) bool {
+	han := 0
 	for _, r := range text {
-		if unicode.Is(unicode.Han, r) {
-			return true
+		switch {
+		case unicode.In(r, unicode.Hiragana, unicode.Katakana):
+			return false
+		case unicode.Is(unicode.Hangul, r):
+			return false
+		case unicode.Is(unicode.Han, r):
+			han++
 		}
 	}
-	return false
+	return han > 0
 }
 
 // langEnglishName 给 OpenAI 的提示词用自然语言描述目标语言。
@@ -470,9 +479,4 @@ func langEnglishName(code string) string {
 		return "Korean"
 	}
 	return "Simplified Chinese"
-}
-
-// langLabelForTarget 给浮窗顶部显示目标语言。
-func langLabelForTarget(code string) string {
-	return langLabel(code)
 }

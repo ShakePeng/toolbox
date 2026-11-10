@@ -5,6 +5,9 @@ import (
 	"runtime"
 
 	"github.com/egoist/mygo"
+	// 应用文案是中文，但 mygo 自带的文案（托盘“退出”等）需要显式引入
+	// 语言包才会显示中文；项目没有语言目录，所以在这里导入。
+	_ "github.com/egoist/mygo/locales/zh-Hans"
 	"github.com/egoist/mygo/plugins/updater"
 	updaternative "github.com/egoist/mygo/plugins/updater/native"
 	"github.com/egoist/mygo/ui"
@@ -24,6 +27,8 @@ func main() {
 	mygo.Use(updaternative.Plugin)
 	a.updatesOn = true
 	mygo.App.SetName(appName)
+	// 日志必须在 Run 之前接管：打包后的 Windows 版本没有 stderr。
+	setupLogging()
 	// 关窗不退出：应用常驻托盘。
 	mygo.App.OnWindowAllClosed(func() {})
 	// 退出前先记下来：窗口的 OnClose 里要区分“用户关窗（隐藏）”和“应用退出（真关）”，

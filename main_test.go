@@ -90,6 +90,54 @@ func TestModPrefixesCtrl(t *testing.T) {
 	}
 }
 
+// 旧版录制器在 Windows/Linux 上会多写一个 Cmd（被当成 Win 键），
+// 升级时要去掉；macOS 的 Cmd 是正常修饰键，不能动。
+func TestMigrateLegacyHotkeys(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Settings.Hotkeys.Translate = "Cmd+Ctrl+Alt+A"
+	cfg.Settings.Hotkeys.Screenshot = "CmdOrCtrl+Shift+S"
+	migrateConfig(&cfg)
+
+	if runtime.GOOS == "darwin" {
+		if cfg.Settings.Hotkeys.Translate != "Cmd+Ctrl+Alt+A" {
+			t.Errorf("macOS 不应改写 Cmd，实际 %q", cfg.Settings.Hotkeys.Translate)
+		}
+		return
+	}
+	if got := cfg.Settings.Hotkeys.Translate; got != "Ctrl+Alt+A" {
+		t.Errorf("旧快捷键应迁移为 Ctrl+Alt+A，实际 %q", got)
+	}
+	// CmdOrCtrl 是合法写法，不能被当成多余的 Cmd 删掉。
+	if got := cfg.Settings.Hotkeys.Screenshot; got != "CmdOrCtrl+Shift+S" {
+		t.Errorf("CmdOrCtrl 不应被改写，实际 %q", got)
+	}
+}
+
+// 只填 API Key 的 OpenAI 服务必须补上默认 Base URL，且判定为已配置。
+func TestMigrateOpenAIBaseURL(t *testing.T) {
+	if providerConfigured(Provider{
+		Kind:        "openai-compatible",
+		Credentials: map[string]string{"apiKey": "k"},
+	}) {
+		t.Fatal("没有 Base URL 的 OpenAI 服务不应判定为已配置")
+	}
+
+	cfg := defaultConfig()
+	cfg.Providers = []Provider{{
+		ID:          "openai",
+		Kind:        "openai-compatible",
+		Credentials: map[string]string{"apiKey": "k"},
+	}}
+	migrateConfig(&cfg)
+	p := cfg.Providers[0]
+	if p.BaseURL != defaultOpenAIBaseURL {
+		t.Errorf("Base URL 应补为 %q，实际 %q", defaultOpenAIBaseURL, p.BaseURL)
+	}
+	if !p.Configured {
+		t.Error("补上 Base URL 后应判定为已配置")
+	}
+}
+
 // 目标语言显示名与代码可互转。
 func TestLangMapping(t *testing.T) {
 	for _, code := range []string{"auto", "zh-CN", "en", "ja"} {

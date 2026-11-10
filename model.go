@@ -1,5 +1,10 @@
 package main
 
+import (
+	"runtime"
+	"strings"
+)
+
 // 本文件对齐原项目（S-Tools）的 Rust 后端（src-tauri/src/models.rs）数据模型，
 // 字段命名沿用 JSON 的 camelCase，方便日后直接迁移旧用户配置。
 
@@ -42,13 +47,24 @@ type Config struct {
 	Providers     []Provider `json:"providers"`
 }
 
+// defaultOpenAIBaseURL 是内置 OpenAI 服务的默认地址。
+// 用户只填 API Key 时也能直接用；自建/兼容服务可以改成自己的地址。
+const defaultOpenAIBaseURL = "https://api.openai.com/v1"
+
+// defaultHotkeys 按平台给出默认快捷键。
+// Windows/Linux 上 F1 和 Alt+D 是系统/浏览器常用键，注册成全局快捷键会
+// 抢走其他程序的输入，所以换成冲突更少的组合；macOS 保持原有默认值。
+func defaultHotkeys() HotkeySettings {
+	if runtime.GOOS == "darwin" {
+		return HotkeySettings{Translate: "Alt+D", Screenshot: "F1"}
+	}
+	return HotkeySettings{Translate: "Ctrl+Alt+D", Screenshot: "Ctrl+Alt+S"}
+}
+
 func defaultSettings() Settings {
 	return Settings{
-		SchemaVersion: 1,
-		Hotkeys: HotkeySettings{
-			Translate:  "Alt+D",
-			Screenshot: "F1",
-		},
+		SchemaVersion:      1,
+		Hotkeys:            defaultHotkeys(),
 		TranslationEnabled: false,
 		ScreenshotEnabled:  false,
 		TargetLang:         "auto",
@@ -73,9 +89,12 @@ func defaultProviders() []Provider {
 			Credentials: map[string]string{},
 		},
 		{
-			ID:          "openai",
-			Name:        "OpenAI",
-			Kind:        "openai-compatible",
+			ID:   "openai",
+			Name: "OpenAI",
+			Kind: "openai-compatible",
+			// 只填 API Key 时直接走官方地址；Base URL 留空会让
+			// “已配置”的服务在每次请求时报“缺少 Base URL”。
+			BaseURL:     defaultOpenAIBaseURL,
 			Description: "接入任意兼容 Chat Completions 的服务。",
 			Credentials: map[string]string{},
 		},
@@ -113,6 +132,10 @@ func providerConfigured(p Provider) bool {
 		if p.Credentials[k] == "" {
 			return false
 		}
+	}
+	// OpenAI 兼容服务还需要请求地址，否则“已配置”的卡片会永远翻译失败。
+	if p.Kind == "openai-compatible" && strings.TrimSpace(p.BaseURL) == "" {
+		return false
 	}
 	return true
 }

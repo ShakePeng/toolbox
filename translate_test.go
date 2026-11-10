@@ -19,6 +19,10 @@ func TestResolveTargetLang(t *testing.T) {
 		{"auto", "hello world", "zh-CN"},
 		{"auto", "你好，世界", "en"},
 		{"auto", "これはテスト", "zh-CN"},
+		// 日文通常含汉字，不能因此判成中文；韩文同理。
+		{"auto", "こんにちは世界", "zh-CN"},
+		{"auto", "안녕하세요 世界", "zh-CN"},
+		{"auto", "混合中文 and English", "en"},
 		{"ja", "hello", "ja"},
 		{"zh-TW", "hello", "zh-TW"},
 	}

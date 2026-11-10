@@ -270,25 +270,6 @@ func arrowHead(a, b ui.Point, width float32) *ui.Path {
 	return path
 }
 
-// drawMosaic 用块平均色覆盖矩形，形成像素化马赛克。
-func drawMosaic(p *ui.Painter, r ui.Rect, m mark, src image.Image, scale float32) {
-	if src == nil || r.W <= 0 || r.H <= 0 {
-		return
-	}
-	block := m.width * 4
-	if block < 8 {
-		block = 8
-	}
-	for y := r.Y; y < r.Y+r.H; y += block {
-		for x := r.X; x < r.X+r.W; x += block {
-			w := minf(block, r.X+r.W-x)
-			h := minf(block, r.Y+r.H-y)
-			col := averageColor(src, x*scale, y*scale, (x+w)*scale, (y+h)*scale)
-			p.Fill(ui.Rect{X: x, Y: y, W: w, H: h}, col, 0)
-		}
-	}
-}
-
 func minf(a, b float32) float32 {
 	if a < b {
 		return a

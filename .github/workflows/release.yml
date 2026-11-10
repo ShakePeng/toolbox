@@ -61,8 +61,38 @@ jobs:
               --draft --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
           fi
 
+  test:
+    name: 测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: go vet / go test
+        run: |
+          go tool mygo vet .
+          CGO_ENABLED=0 go test ./...
+
+  # Windows 专属代码（capture_windows.go / selection_windows.go）只在
+  # windows 构建标签下编译，macOS 上的测试覆盖不到，单独跑一遍。
+  windows-test:
+    name: Windows 测试
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - run: go test ./...
+
   build:
-    needs: draft-release
+    needs: [draft-release, test, windows-test]
     name: macOS + Windows
     runs-on: macos-latest
     steps:

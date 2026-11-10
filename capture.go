@@ -97,6 +97,10 @@ func (a *app) startCapture() {
 		return
 	}
 
+	// 翻译浮窗是置顶窗口，先收起：否则会被截进冻结画面，也可能盖住截图工具栏。
+	if a.trans != nil {
+		a.trans.hide()
+	}
 	restore := a.win != nil && a.win.IsVisible()
 	if restore {
 		a.win.Hide()
