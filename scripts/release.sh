@@ -77,4 +77,4 @@ git tag -a "$tag" -m "$tag"
 git push origin "$tag"
 
 echo
-echo "已推送 $tag。到 GitHub Actions 看进度，完成后 App 内的「检查更新」即可发现新版本。"
+echo "已推送 ${tag}。到 GitHub Actions 看进度，完成后 App 内的「检查更新」即可发现新版本。"
