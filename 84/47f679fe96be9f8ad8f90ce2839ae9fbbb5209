@@ -1,0 +1,19 @@
+icons.go
+  s_5a727a1a7d9bda::t_7d1912c2b11947 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "8447f679fe96be9f8ad8f90ce2839ae9fbbb5209",
+  "prompts": {},
+  "sessions": {
+    "s_5a727a1a7d9bda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8049c1d3-c7f4-4ada-a7e2-a000ed876703",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
