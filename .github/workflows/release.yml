@@ -22,11 +22,41 @@ jobs:
       - name: 校验 tag 与 mygo.json 的版本号一致
         run: test "$GITHUB_REF_NAME" = "v$(jq -r .version mygo.json)"
 
+      # release 说明取自 CHANGELOG.md 中当前版本的小节，和更新弹窗里的说明一致。
+      - name: 提取版本更新说明
+        run: |
+          python3 - <<'PY'
+          import os
+          version = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          notes, on = [], False
+          for line in open("CHANGELOG.md", encoding="utf-8"):
+              if line.startswith("## "):
+                  if on:
+                      break
+                  first = line[3:].strip().split()[0] if line[3:].strip() else ""
+                  first = first.lstrip("[").split("]")[0]
+                  on = first.lstrip("v") == version
+                  continue
+              if on:
+                  notes.append(line)
+          text = "".join(notes).strip()
+          open("release-notes.md", "w", encoding="utf-8").write(text + ("\n" if text else ""))
+          print(text or "(CHANGELOG.md 中没有该版本的小节，将使用 GitHub 自动生成的说明)")
+          PY
+
       - name: 创建草稿 release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            # 上次失败留下的草稿：把说明补上
+            if [ -s release-notes.md ]; then
+              gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes-file release-notes.md
+            fi
+          elif [ -s release-notes.md ]; then
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --draft --verify-tag --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+          else
             gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
               --draft --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
           fi
