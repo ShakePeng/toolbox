@@ -127,7 +127,9 @@ func (a *app) view(c *ui.Context) {
 		// 深色纵向渐变 + 顶部暖色光晕，对齐原版 body 背景。
 		shell.Gradient(ui.Hex("#292a2e"), colBg, 180)
 		shell.Children(func() {
-			ui.Box(c).Absolute().Top(0).Left(0).Right(0).Height(380).IgnoreInput(true).
+			// 光晕要铺满整个窗口：之前限高 380，半径 520 的光晕在底部被硬切，
+			// 渐变会突然断掉，露出一条横向接缝。
+			ui.Box(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).IgnoreInput(true).
 				RadialGradient(ui.RadialGradient{
 					Stops:  []ui.GradientStop{{Color: colAccentSoft, At: 0}, {Color: ui.Transparent, At: 1}},
 					Center: ui.Point{X: 0.72, Y: 0},
@@ -201,8 +203,6 @@ func (a *app) providerColumns(c *ui.Context) int {
 	}
 }
 
-func (a *app) screenshotTwoColumn(c *ui.Context) bool { return a.contentWidth(c) >= 700 }
-
 func (a *app) sidebar(c *ui.Context) {
 	ui.Column(c).Width(a.sidebarWidth(c)).Shrink(0).Padding(24, 18, 20, 18).Gap(30).
 		Background(ui.RGBA(42, 43, 47, 0.82)).BorderColor(colLine).BorderEndWidth(1).Children(func() {
@@ -214,7 +214,7 @@ func (a *app) sidebar(c *ui.Context) {
 			ui.Column(c).Gap(3).Children(func() {
 				ui.Row(c).Gap(6).AlignItems(ui.Baseline).Children(func() {
 					ui.Text(c, "Toolbox").FontSize(16).Bold()
-					ui.Text(c, "v"+appVersion).FontSize(11).TextColor(colTextMuted)
+					ui.Text(c, "v"+appVersion()).FontSize(11).TextColor(colTextMuted)
 				})
 				ui.Text(c, appSubtitle).FontSize(12).TextColor(colTextMuted)
 			})
@@ -224,16 +224,6 @@ func (a *app) sidebar(c *ui.Context) {
 			for _, it := range a.visibleSections() {
 				a.navItem(c, it)
 			}
-		})
-		ui.Spacer(c)
-		// 底部状态卡
-		ui.Row(c).Gap(10).AlignItems(ui.Center).Padding(14, 12).Radius(12).
-			Background(ui.RGBA(255, 255, 255, 0.045)).Border(1, colLine).Children(func() {
-			ui.Box(c).Size(8, 8).Radius(4).Background(colSuccess)
-			ui.Column(c).Gap(2).Children(func() {
-				ui.Text(c, "本地优先").FontSize(12).Bold()
-				ui.Text(c, "不采集使用数据").FontSize(11).TextColor(colTextMuted)
-			})
 		})
 	})
 }
@@ -447,43 +437,14 @@ func (a *app) providerCard(c *ui.Context, i int) ui.Element {
 
 func (a *app) screenshotSection(c *ui.Context) {
 	a.intro(c, "SCREENSHOT", "截图标注", "冻结当前屏幕，完成框选、标注、复制和保存。", func() {
-		if primaryBtn(c, "开始截图").Clicked() {
-			a.startCapture()
+		if primaryBtn(c, "保存截图设置").Clicked() {
+			a.saveSettingsUI()
 		}
 	})
 
 	a.permissionStrip(c, "屏幕录制权限", "用于捕获当前显示器画面并进入标注编辑。", "screenRecording", permissions().ScreenRecording)
 
-	if a.screenshotTwoColumn(c) {
-		ui.Row(c).Gap(14).AlignItems(ui.Stretch).Children(func() {
-			a.captureActionPanel(c).Grow(1)
-			a.captureConfigPanel(c).Width(320).Shrink(0)
-		})
-	} else {
-		ui.Column(c).Gap(14).Children(func() {
-			a.captureActionPanel(c)
-			a.captureConfigPanel(c)
-		})
-	}
-
-	a.saveBar(c, "保存截图设置")
-}
-
-// captureActionPanel 是截图页左侧的介绍面板。
-func (a *app) captureActionPanel(c *ui.Context) ui.Element {
-	return ui.Row(c).MinWidth(0).Gap(16).AlignItems(ui.Center).Padding(20).Radius(18).
-		Background(colBgElevated).Border(1, colLine).Children(func() {
-		ui.Box(c).Width(170).Height(132).Radius(13).Border(1, ui.RGBA(245, 158, 11, 0.5)).
-			Background(ui.RGBA(245, 158, 11, 0.06))
-		ui.Column(c).Grow(1).MinWidth(0).Gap(6).Children(func() {
-			ui.Text(c, "CAPTURE").FontSize(11).Bold().TextColor(colTextMuted).LetterSpacing(1.2).SingleLine()
-			ui.Text(c, "区域截图").FontSize(18).Bold()
-			ui.Text(c, "支持矩形、椭圆、箭头、画笔、文字和马赛克标注。").FontSize(12).TextColor(colTextSoft)
-		})
-		if secondaryBtn(c, "启动截图").Clicked() {
-			a.startCapture()
-		}
-	})
+	a.captureConfigPanel(c)
 }
 
 // captureConfigPanel 是截图页右侧的快捷键面板。
@@ -537,7 +498,7 @@ func (a *app) settingsSection(c *ui.Context) {
 		}
 		ui.Column(c).Grow(1).Gap(4).Children(func() {
 			ui.Text(c, "TOOLBOX DESKTOP").FontSize(11).Bold().TextColor(colTextMuted).LetterSpacing(1.4)
-			ui.Text(c, "版本 "+appVersion).FontSize(25).Bold()
+			ui.Text(c, "版本 "+appVersion()).FontSize(25).Bold()
 			ui.Text(c, a.updateHint()).FontSize(13).TextColor(colTextSoft)
 		})
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {

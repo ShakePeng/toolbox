@@ -49,6 +49,9 @@ func sToolsTheme() *ui.Theme {
 	t.Text = colText
 	t.TextMuted = colTextMuted
 	t.Accent = colAccent
+	// 窗口失焦时 mygo 默认把强调色调灰（InactiveAccent）；
+	// 这里保持琥珀色，开关、焦点环在非激活窗口里也还是品牌色。
+	t.InactiveAccent = colAccent
 	t.AccentHover = colAccentStr
 	t.AccentPressed = colAccent
 	t.AccentText = colKnob

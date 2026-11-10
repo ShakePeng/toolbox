@@ -10,27 +10,36 @@ import (
 	"runtime"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/permissionflow"
 )
 
 const (
 	appName     = "Toolbox"
 	appSubtitle = "轻巧的桌面工具箱"
-	appVersion  = "1.0.0"
 	// releasePageURL 是 GitHub 发布页，“查看 Releases”和更新说明都指向它。
 	releasePageURL = "https://github.com/ShakePeng/toolbox/releases"
 )
 
+// appVersion 用打包后的版本号（Info.plist），开发构建没有包信息时回退到当前版本。
+func appVersion() string {
+	if v := mygo.App.Version(); v != "" {
+		return v
+	}
+	return "1.0.1"
+}
+
 // PermissionStatus 是插件所需系统权限的快照。
-// 阶段一先返回占位值；阶段二用 mygo 权限检测 / 自研 AX 检测替换。
 type PermissionStatus struct {
 	Accessibility   bool
 	ScreenRecording bool
 }
 
-// permissions 返回当前系统权限状态（占位实现）。
+// permissions 用 mygo 的权限检测读取真实状态，不再写死 false。
 func permissions() PermissionStatus {
-	// TODO(phase2): macOS 用 AXIsProcessTrusted / CGPreflightScreenCaptureAccess 检测。
-	return PermissionStatus{Accessibility: false, ScreenRecording: false}
+	return PermissionStatus{
+		Accessibility:   permissionflow.Allowed(permissionflow.Accessibility),
+		ScreenRecording: permissionflow.Allowed(permissionflow.ScreenRecording),
+	}
 }
 
 // startTranslation 触发一次划词翻译。阶段一为桩：只记录日志并提示。
@@ -40,10 +49,15 @@ func (a *app) startTranslation() {
 	log.Printf("%s: 触发划词翻译（阶段一桩实现）", appName)
 }
 
-// onPermission 打开系统权限设置页（占位，阶段二接入）。
+// onPermission 打开系统设置里对应的授权页。
 func (a *app) onPermission(kind string) {
-	// TODO(phase2): 打开 macOS 系统设置对应面板。
-	a.toast("请在系统设置中授权：" + kind)
+	p := permissionflow.Accessibility
+	if kind == "screenRecording" {
+		p = permissionflow.ScreenRecording
+	}
+	if err := permissionflow.OpenSettings(p); err != nil {
+		a.toast("请手动打开 系统设置 → 隐私与安全性 完成授权")
+	}
 }
 
 // trayIcon 画一个工具箱样式的托盘中图标。
