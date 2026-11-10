@@ -1,0 +1,32 @@
+.gitattributes
+  h_43e8aa1243350d 1-2
+.github/workflows/release.yml
+  h_43e8aa1243350d 75-115,120-149
+.gitignore
+  h_43e8aa1243350d 8-13
+CHANGELOG.md
+  h_43e8aa1243350d 3-15
+mygo.json
+  h_43e8aa1243350d 4
+scripts/dev.sh
+  h_43e8aa1243350d 1-22
+scripts/macos-signing.sh
+  h_43e8aa1243350d 2,4-7,9-23,26-27,31-110,112-176,179-253
+scripts/release.sh
+  h_43e8aa1243350d 66
+signing/README.md
+  h_43e8aa1243350d 1-69
+signing/toolbox-signing.cer
+  h_43e8aa1243350d 1-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "c55de2c9a2fd20bcd80ac40bebbfa64ad38d608e",
+  "prompts": {},
+  "humans": {
+    "h_43e8aa1243350d": {
+      "author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
