@@ -82,7 +82,7 @@ func (a *app) saveProvider(test bool) {
 	name := d.Name
 	a.closeProvider()
 	if test {
-		a.toast(name + "：配置已保存（连通性测试将于后续阶段接入）")
+		a.testProvider(d.idx)
 	} else {
 		a.toast(name + "：配置已保存")
 	}

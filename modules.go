@@ -25,7 +25,7 @@ func appVersion() string {
 	if v := mygo.App.Version(); v != "" {
 		return v
 	}
-	return "1.0.1"
+	return "1.0.5"
 }
 
 // PermissionStatus 是插件所需系统权限的快照。
@@ -42,11 +42,44 @@ func permissions() PermissionStatus {
 	}
 }
 
-// startTranslation 触发一次划词翻译。阶段一为桩：只记录日志并提示。
-// 阶段二实现：读取选区文本 -> 并发调用 Provider -> 显示悬浮翻译窗。
+// startTranslation 读取当前应用的选中文本，并发请求各服务，展示翻译浮窗。
 func (a *app) startTranslation() {
-	a.toast("划词翻译模块将在后续阶段接入")
-	log.Printf("%s: 触发划词翻译（阶段一桩实现）", appName)
+	if !a.settings.TranslationEnabled {
+		a.translationNotice("划词翻译未开启，请先在概览中打开", false)
+		return
+	}
+	if len(translationProviders(a.providers)) == 0 {
+		a.translationNotice("请先在翻译页配置并启用至少一个翻译服务", false)
+		return
+	}
+	// 选区读取依赖辅助功能；没有权限时直接提示，避免 AX 返回难懂的错误码。
+	if !permissionflow.Allowed(permissionflow.Accessibility) {
+		a.translationNotice("需要辅助功能权限才能读取选中文本，请到翻译页授权", true)
+		return
+	}
+	text, err := readSelectedText()
+	if err != nil {
+		// 这些失败都发生在浮窗打开之前，用浮窗提示，避免主窗口隐藏时毫无反馈。
+		log.Printf("%s: 读取选中文本失败：%v", appName, err)
+		a.translationNotice("读取选中文本失败："+err.Error(), true)
+		return
+	}
+	log.Printf("%s: 划词翻译，%d 个字符", appName, len(text))
+
+	target := resolveTargetLang(a.settings.TargetLang, text)
+	if a.trans == nil {
+		a.trans = newTranslationSession(a)
+	}
+	a.trans.translate(text, target)
+}
+
+// translationNotice 复用翻译浮窗展示一条提示（主窗口可能处于隐藏状态）。
+// allowEdit 表示是否允许用户直接在浮窗里手动输入原文。
+func (a *app) translationNotice(msg string, allowEdit bool) {
+	if a.trans == nil {
+		a.trans = newTranslationSession(a)
+	}
+	a.trans.showNotice(msg, allowEdit)
 }
 
 // onPermission 打开系统设置里对应的授权页。

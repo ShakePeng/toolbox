@@ -47,6 +47,8 @@ type app struct {
 	registered map[string]string
 
 	capture *captureSession
+	// trans 是复用的划词翻译浮窗，首次划词时创建。
+	trans *translationSession
 }
 
 type sectionItem struct {
