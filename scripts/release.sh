@@ -43,7 +43,9 @@ echo "tag    $tag"
 if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
 	fail "本地已存在 tag $tag"
 fi
-if [ -n "$(git ls-remote --tags origin "refs/tags/$tag" 2>/dev/null)" ]; then
+# 远端检查走 push 用的地址：这个网络下 fetch 的 HTTPS 会 SSL 握手失败，SSH 正常。
+remote_url="$(git remote get-url --push origin)"
+if [ -n "$(git ls-remote --tags "$remote_url" "refs/tags/$tag" 2>/dev/null)" ]; then
 	fail "远端已存在 tag $tag"
 fi
 
