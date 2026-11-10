@@ -1,0 +1,41 @@
+.github/workflows/release.yml
+  s_5a727a1a7d9bda::t_d31520c145b22c 66,75-85,137,139,163-167
+.gitignore
+  s_5a727a1a7d9bda::t_98254554657044 7
+CHANGELOG.md
+  s_5a727a1a7d9bda::t_e5cb344a9b1fa3 3-17
+app.go
+  s_5a727a1a7d9bda::t_f2cbbb795a590a 6,354-357,454-457
+capture.go
+  s_5a727a1a7d9bda::t_e1e5465fdd05f5 105
+capture_darwin.go
+  s_5a727a1a7d9bda::t_3287d31285dbc8 1-40
+capture_other.go
+  s_5a727a1a7d9bda::t_16a6d6b5234f88 1-15
+capture_windows.go
+  s_5a727a1a7d9bda::t_c7ac60a8cfbbe5 1-166
+modules.go
+  s_5a727a1a7d9bda::t_627324c1f2fa00 28,55-57
+mygo.json
+  s_5a727a1a7d9bda::t_51ac0daf5f836b 4
+selection_other.go
+  s_5a727a1a7d9bda::t_2c0576ae758078 1,7-8
+selection_windows.go
+  s_5a727a1a7d9bda::t_95c06b4c0903ca 1-151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "48742a02c56bc1ae74da7836c10afe77dccc9c8e",
+  "prompts": {},
+  "sessions": {
+    "s_5a727a1a7d9bda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8049c1d3-c7f4-4ada-a7e2-a000ed876703",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
