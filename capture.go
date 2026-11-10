@@ -40,6 +40,9 @@ type captureSession struct {
 	W, H   float32     // 覆盖层逻辑尺寸（点）
 	scale  float32     // 每点的物理像素数
 
+	// safeBottom 是可被点到的区域下边界，避开底部的程序坞。
+	safeBottom float32
+
 	restoreMain bool // 结束后是否恢复主窗口
 
 	hasSel bool
@@ -68,6 +71,11 @@ type captureSession struct {
 	textValue   string
 	textPos     ui.Point
 	textIndex   int
+
+	// 待执行的输出动作。输出要等一帧再截，否则正在输入的文字框会被截进图里。
+	pending *captureAction
+
+	closed bool
 }
 
 // ---------------- 启动 ----------------
@@ -79,12 +87,14 @@ func (a *app) startCapture() {
 	}
 	pt := mygo.Screen.CursorScreenPoint()
 	disp := mygo.Screen.DisplayNearestPoint(pt)
-	wa := disp.WorkArea
+	// 整块屏幕，而不是 WorkArea：WorkArea 会裁掉顶部菜单栏和程序坞，
+	// 那两块在截图时需要能选到。
+	area := disp.Bounds
 
 	// 先确认屏幕录制权限；没有就先申请并提示，避免抓到纯壁纸造成“窗口消失”的错觉。
 	if !screenRecordingGranted() {
 		requestScreenRecording()
-		a.toast("请在“系统设置 → 隐私与安全性 → 屏幕录制”勾选本应用后重试；首次授权后需重启应用")
+		a.toast("请在“系统设置 → 隐私与安全性”勾选本应用后重试；首次授权后需重启应用")
 		return
 	}
 
@@ -93,7 +103,7 @@ func (a *app) startCapture() {
 		a.win.Hide()
 	}
 
-	pngData, img, err := captureRegion(wa)
+	pngData, img, err := captureRegion(area)
 	if err != nil {
 		if restore {
 			a.win.Show()
@@ -101,7 +111,7 @@ func (a *app) startCapture() {
 		a.toast("截图失败：" + err.Error())
 		return
 	}
-	a.openCaptureOverlay(disp, wa, pngData, img, restore)
+	a.openCaptureOverlay(disp, area, pngData, img, restore)
 }
 
 // captureRegion 用系统 screencapture 抓取一块屏幕区域到 PNG，并解码像素。
@@ -130,7 +140,7 @@ func captureRegion(r mygo.Rectangle) ([]byte, image.Image, error) {
 	return data, img, nil
 }
 
-func (a *app) openCaptureOverlay(disp mygo.Display, wa mygo.Rectangle, pngData []byte, img image.Image, restore bool) {
+func (a *app) openCaptureOverlay(disp mygo.Display, area mygo.Rectangle, pngData []byte, img image.Image, restore bool) {
 	bitmap, err := ui.DecodeBitmap(pngData)
 	if err != nil {
 		if restore {
@@ -148,8 +158,8 @@ func (a *app) openCaptureOverlay(disp mygo.Display, wa mygo.Rectangle, pngData [
 		display:     disp,
 		bitmap:      bitmap,
 		srcImg:      img,
-		W:           float32(wa.Width),
-		H:           float32(wa.Height),
+		W:           float32(area.Width),
+		H:           float32(area.Height),
 		scale:       scale,
 		restoreMain: restore,
 		tool:        "select",
@@ -157,12 +167,18 @@ func (a *app) openCaptureOverlay(disp mygo.Display, wa mygo.Rectangle, pngData [
 		strokeWidth: 3,
 		selected:    -1,
 	}
+	// 可点击区域的下边界（相对覆盖层）：程序坞在底部时，WorkArea 的下边界
+	// 会比整屏高，工具栏不能落在那之外，否则会被程序坞挡住点不到。
+	s.safeBottom = s.H
+	if wa := disp.WorkArea; wa.Height > 0 {
+		s.safeBottom = float32(wa.Y + wa.Height - area.Y)
+	}
 	s.win = mygo.NewWindow(mygo.WindowOptions{
 		Title:             "截图",
-		X:                 wa.X,
-		Y:                 wa.Y,
-		Width:             wa.Width,
-		Height:            wa.Height,
+		X:                 area.X,
+		Y:                 area.Y,
+		Width:             area.Width,
+		Height:            area.Height,
 		Frameless:         true,
 		Panel:             true,
 		AlwaysOnTop:       true,
@@ -181,29 +197,42 @@ func (a *app) openCaptureOverlay(disp mygo.Display, wa mygo.Rectangle, pngData [
 	})
 	a.capture = s
 	s.win.Show()
-	s.win.Focus()
+	// 窗口刚显示时会被 AppKit 挪进工作区（菜单栏下方）：
+	// 去掉标题栏样式并提到系统 UI 之上，再按整屏重新摆一次。
+	// 无边框窗口要补回键盘焦点，否则 Esc 收不到。
+	mygo.RunOnMain(func() {
+		h := s.win.NativeHandle()
+		coverSystemUI(h)
+		s.win.SetBounds(mygo.Rectangle{X: area.X, Y: area.Y, Width: area.Width, Height: area.Height})
+		s.win.Focus()
+		focusWindowContent(h)
+	})
 }
 
 // ---------------- 视图 ----------------
 
 func (s *captureSession) view(c *ui.Context) {
-	// 键盘
-	if s.editingText {
-		if c.Shortcut(0, ui.KeyEscape) {
-			s.editingText = false
-		}
-	} else {
-		if c.Shortcut(0, ui.KeyEscape) {
-			s.cancel()
-		}
+	// 上一帧的输出请求在这里执行：此时画面已经按“输入框已收起”重绘过，
+	// 再取画面才不会把输入框截进去。没有窗口时没有画面可取，保留请求。
+	if s.pending != nil && s.win != nil {
+		act := *s.pending
+		s.pending = nil
+		s.complete(act)
+	}
+
+	// 键盘：ESC 直接退出截图（输入文字时也一样，放弃本次截图）
+	if c.Shortcut(0, ui.KeyEscape) {
+		s.cancel()
+	}
+	if !s.editingText {
 		if c.Shortcut(0, ui.KeyEnter) {
-			s.complete(actCopy)
+			s.requestComplete(actCopy)
 		}
 		if c.Shortcut(ui.Cmd, ui.KeyC) {
-			s.complete(actCopy)
+			s.requestComplete(actCopy)
 		}
 		if c.Shortcut(ui.Cmd, ui.KeyS) {
-			s.complete(actSave)
+			s.requestComplete(actSave)
 		}
 		if c.Shortcut(0, ui.KeyDelete) || c.Shortcut(0, ui.KeyBackspace) {
 			s.deleteSelected()
@@ -215,7 +244,9 @@ func (s *captureSession) view(c *ui.Context) {
 		}
 	}
 
-	ui.Themed(c, ui.DarkTheme()).Fill().Children(func() {
+	// 最外层也接输入：工具栏、文字框会挡住背景层的点击，
+	// 在这里拦截右键，保证任意位置右键都能退出。
+	ui.Themed(c, ui.DarkTheme()).Fill().HandleInput(s.onGlobalInput).Children(func() {
 		ui.Box(c).Fill().HandleInput(s.onInput).Draw(func(p *ui.Painter, r ui.Rect) {
 			s.paint(p)
 		})
@@ -270,12 +301,18 @@ func (s *captureSession) paint(p *ui.Painter) {
 
 // paintHint 在尚未框选时给出操作提示。
 func (s *captureSession) paintHint(p *ui.Painter) {
-	const txt = "拖拽选择截图区域 · 双击全屏 · Esc 取消"
-	w := float32(380)
+	const (
+		txt        = "拖拽选择区域 · 双击复制 · Esc / 右键退出"
+		size       = 13
+		padX, padY = 18, 7
+	)
+	// 按文字实际尺寸算背景框，文字才能真正居中（p.Text 的 y 是布局顶边）。
+	tw, th := p.MeasureText(0, ui.Span{Text: txt, Size: size})
+	w, h := tw+2*padX, th+2*padY
 	x := (s.W - w) / 2
 	y := float32(44)
-	p.Fill(ui.Rect{X: x, Y: y, W: w, H: 32}, ui.RGBA(0, 0, 0, 0.62), 8)
-	p.Text(x+18, y+21, txt, 13, ui.RGBA(255, 255, 255, 0.95))
+	p.Fill(ui.Rect{X: x, Y: y, W: w, H: h}, ui.RGBA(0, 0, 0, 0.62), h/2)
+	p.Text(x+padX, y+padY, txt, size, ui.RGBA(255, 255, 255, 0.95))
 }
 
 func (s *captureSession) paintSel(p *ui.Painter) {
@@ -290,14 +327,22 @@ func (s *captureSession) paintSel(p *ui.Painter) {
 		p.Fill(ui.Rect{X: c.X - 4, Y: c.Y - 4, W: 8, H: 8}, white, 1)
 		p.Stroke(ui.Rect{X: c.X - 4, Y: c.Y - 4, W: 8, H: 8}, ui.RGBA(0, 0, 0, 0.5), 1, 1)
 	}
+	// 尺寸标签：优先放选区上方，放不下就放到选区顶部里面。
+	// 文字按“顶部对齐”绘制（p.Text 的 y 是文字布局的顶边，不是基线），
+	// 这里用 labelH 估算行高，保证字落在背景框内。
+	const (
+		labelW   = 84
+		labelH   = 18
+		labelPad = 6
+	)
 	label := fmt.Sprintf("%d × %d", int(sel.W), int(sel.H))
-	ly := sel.Y - 20
-	if ly < 4 {
-		ly = sel.Y + 6
+	ly := sel.Y - labelH - 4
+	if ly < 2 {
+		ly = sel.Y + 4
 	}
-	lx := clamp(sel.X, 4, s.W-90)
-	p.Fill(ui.Rect{X: lx - 4, Y: ly - 2, W: 84, H: 18}, ui.RGBA(0, 0, 0, 0.6), 4)
-	p.Text(lx, ly+12, label, 12, ui.RGBA(255, 255, 255, 1))
+	lx := clamp(sel.X, 4, s.W-labelW-6)
+	p.Fill(ui.Rect{X: lx, Y: ly, W: labelW, H: labelH}, ui.RGBA(0, 0, 0, 0.6), 4)
+	p.Text(lx+labelPad, ly+2, label, 12, ui.RGBA(255, 255, 255, 1))
 }
 
 // handleDir 返回第 i 个手柄向外的单位方向。
@@ -351,26 +396,53 @@ func (s *captureSession) clampSel() {
 	s.sel = r
 }
 
+// bottom 是可点到的区域下边界；没单独设置时就是覆盖层底部。
+func (s *captureSession) bottom() float32 {
+	if s.safeBottom > 0 {
+		return s.safeBottom
+	}
+	return s.H
+}
+
 // ---------------- 输入 ----------------
+
+// onGlobalInput 是最外层的输入入口，只用来兜住被工具栏/文字框挡住的右键。
+// 左键一律返回 false，交给下面的背景层和控件正常处理。
+func (s *captureSession) onGlobalInput(ev ui.InputEvent) bool {
+	if ev.Kind == ui.InputPointerDown && ev.Button != 0 {
+		s.cancel()
+		return true
+	}
+	return false
+}
 
 func (s *captureSession) onInput(ev ui.InputEvent) bool {
 	p := ui.Point{X: ev.X, Y: ev.Y}
 	switch ev.Kind {
 	case ui.InputPointerDown:
 		if ev.Button != 0 {
-			return false
+			// 右键单击退出截图
+			s.cancel()
+			return true
 		}
+		// 点到别处就把正在输入的文字落笔，不用再按回车
+		s.flushText()
 		s.press = p
 		s.origSel = s.sel
+		// 左键双击复制截图（选区外双击按全屏处理，见下面 select 分支）
+		if ev.Clicks >= 2 && s.hasSel && pointInRect(p, normRect(s.sel)) {
+			s.requestComplete(actCopy)
+			return true
+		}
 		// 「选择」工具：框选、移动/调整选区、选标注并移动
 		if s.tool == "select" {
 			if ev.Clicks >= 2 && (!s.hasSel || !pointInRect(p, normRect(s.sel))) {
 				s.sel = ui.Rect{X: 0, Y: 0, W: s.W, H: s.H}
 				s.hasSel = true
 				if ev.Mods == 0 {
-					s.complete(actCopy)
+					s.requestComplete(actCopy)
 				} else {
-					s.complete(actSave)
+					s.requestComplete(actSave)
 				}
 				return true
 			}
@@ -558,13 +630,23 @@ func (s *captureSession) beginText(p ui.Point) {
 	s.textIndex = -1
 }
 
+// textSize 是文字标注的字号，编辑框也用同一字号，做到所见即所得。
+func (s *captureSession) textSize() float32 { return 14 + s.strokeWidth*2 }
+
+// flushText 把正在编辑的文字立即落笔。点到别处、切工具、复制时都会调用，
+// 不用再按回车。
+func (s *captureSession) flushText() {
+	if s.editingText {
+		s.commitText()
+	}
+}
+
 func (s *captureSession) commitText() {
 	if s.textValue == "" {
 		s.editingText = false
 		return
 	}
-	size := 14 + s.strokeWidth*2
-	m := mark{kind: mkText, rect: ui.Rect{X: s.textPos.X, Y: s.textPos.Y}, text: s.textValue, color: s.color, size: size, width: s.strokeWidth}
+	m := mark{kind: mkText, rect: ui.Rect{X: s.textPos.X, Y: s.textPos.Y}, text: s.textValue, color: s.color, size: s.textSize(), width: s.strokeWidth}
 	s.pushUndo()
 	s.marks = append(s.marks, m)
 	s.selected = len(s.marks) - 1
@@ -579,9 +661,12 @@ func (s *captureSession) textEditor(c *ui.Context) {
 	if !s.editingText {
 		return
 	}
-	ui.Row(c).Absolute().Left(clamp(s.textPos.X, 4, s.W-260)).Top(clamp(s.textPos.Y, 4, s.H-40)).
+	ui.Row(c).Absolute().Left(clamp(s.textPos.X, 4, s.W-260)).Top(clamp(s.textPos.Y, 4, s.H-48)).
 		Width(250).Children(func() {
-		if ui.TextInput(c, &s.textValue).AutoFocus().Label("文字").Submitted() {
+		// 用无外观的输入框：没有背景和边框，直接叠在截图上输入。
+		// 字号、颜色和最终标注一致，提交后文字不会跳位置、变大小。
+		if ui.TextInputBase(c, &s.textValue).AutoFocus().Label("文字").
+			FontSize(s.textSize()).TextColor(s.color).Submitted() {
 			s.commitText()
 		}
 	})
@@ -645,12 +730,16 @@ func (s *captureSession) deleteSelected() {
 func (s *captureSession) toolbar(c *ui.Context) {
 	sel := normRect(s.sel)
 	const tbH = 46
+	bottom := s.bottom()
 	tby := sel.Y + sel.H + 12 // 先放选区下方
-	if tby+tbH > s.H {        // 下方放不下，放上方
+	if tby+tbH > bottom {     // 下方放不下，放上方
 		tby = sel.Y - tbH - 12
 	}
-	if tby < 6 { // 上下都放不下，贴屏幕底部（暗区）
-		tby = s.H - tbH - 8
+	if tby < 6 { // 上下都放不下，贴可点击区域底部（暗区，避开程序坞）
+		tby = bottom - tbH - 8
+		if tby < 6 {
+			tby = 6
+		}
 	}
 	tbx := clamp(sel.X, 8, s.W-8)
 	ui.Row(c).Absolute().Left(tbx).Top(tby).
@@ -670,20 +759,23 @@ func (s *captureSession) toolbar(c *ui.Context) {
 		}
 		divider(c)
 		if iconBtn(c, "undo", "撤销").Clicked() {
+			s.flushText()
 			s.undo()
 		}
 		if iconBtn(c, "redo", "重做").Clicked() {
+			s.flushText()
 			s.redo()
 		}
 		if iconBtn(c, "trash", "删除").Clicked() {
+			s.flushText()
 			s.deleteSelected()
 		}
 		divider(c)
 		if s.actionBtn(c, "copy", "复制", true).Clicked() {
-			s.complete(actCopy)
+			s.requestComplete(actCopy)
 		}
 		if s.actionBtn(c, "save", "保存", false).Clicked() {
-			s.complete(actSave)
+			s.requestComplete(actSave)
 		}
 		if iconBtn(c, "close", "取消").Clicked() {
 			s.cancel()
@@ -712,6 +804,8 @@ func (s *captureSession) toolButton(c *ui.Context, iconName, label, tool string)
 		ui.Icon(c, icon(iconName)).FontSize(15).TextColor(fg)
 	})
 	if b.Clicked() {
+		// 切换工具时先把正在输入的文字落笔
+		s.flushText()
 		s.tool = tool
 	}
 }
@@ -753,6 +847,17 @@ func (s *captureSession) colorSwatch(c *ui.Context, col ui.Color) {
 }
 
 // ---------------- 输出 ----------------
+
+// requestComplete 请求输出，真正截取放到下一帧。
+// CapturePage 取的是上一帧已经画好的画面：先把正在输入的文字落笔，
+// 让这一帧按“输入框已收起”重绘，下一帧再截，输入框才不会被打进图里。
+func (s *captureSession) requestComplete(action captureAction) {
+	s.flushText()
+	s.pending = &action
+	if s.win != nil {
+		s.win.Invalidate()
+	}
+}
 
 func (s *captureSession) complete(action captureAction) {
 	sel := normRect(s.sel)
@@ -826,6 +931,10 @@ func (s *captureSession) cancel() {
 }
 
 func (s *captureSession) close() {
+	if s.closed {
+		return
+	}
+	s.closed = true
 	if s.win != nil {
 		s.win.Destroy()
 	}

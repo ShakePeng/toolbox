@@ -159,7 +159,9 @@ func drawMark(p *ui.Painter, m mark, src image.Image, scale float32) {
 			p.StrokePath(path, m.width, m.color)
 		}
 	case mkText:
-		p.Text(m.rect.X, m.rect.Y+m.size, m.text, m.size, m.color)
+		// 绘制原点就是点击位置，和无外观的输入框对齐，
+		// 提交前后文字停在原地，不会突然往下跳一个行高。
+		p.Text(m.rect.X, m.rect.Y, m.text, m.size, m.color)
 	case mkMosaic:
 		drawMosaicBrush(p, m, src, scale)
 	}

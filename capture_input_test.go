@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -8,7 +9,8 @@ import (
 
 func newTestSession() *captureSession {
 	return &captureSession{
-		W: 400, H: 300, scale: 1,
+		app: &app{},
+		W:   400, H: 300, scale: 1,
 		tool: "select", color: ui.RGBA(244, 63, 63, 1), strokeWidth: 3,
 		selected: -1,
 	}
@@ -133,6 +135,259 @@ func TestDrawToolOutsideSelection(t *testing.T) {
 	}
 	if s.hasSel {
 		t.Fatal("选区外拖拽不应开始框选")
+	}
+}
+
+// 还没框选时的提示文字要在背景框里居中，不能偏下、偏左。
+func TestHintTextCentered(t *testing.T) {
+	s := newTestSession()
+	tt := ui.NewTester(s.view, 400, 300)
+	tt.Frame()
+	img := tt.Image()
+	if img == nil {
+		t.Fatal("渲染结果为空")
+	}
+
+	x0, y0, x1, y1 := 1<<30, 1<<30, -1, -1
+	for y := 0; y < 120; y++ {
+		for x := 0; x < 400; x++ {
+			r, g, b, _ := img.At(x, y).RGBA()
+			if r>>8 > 200 && g>>8 > 200 && b>>8 > 200 {
+				if x < x0 {
+					x0 = x
+				}
+				if y < y0 {
+					y0 = y
+				}
+				if x > x1 {
+					x1 = x
+				}
+				if y > y1 {
+					y1 = y
+				}
+			}
+		}
+	}
+	if x1 < 0 {
+		t.Fatal("没有找到提示文字")
+	}
+	cx, cy := float64(x0+x1)/2, float64(y0+y1)/2
+	if math.Abs(cx-200) > 3 {
+		t.Fatalf("提示文字没有水平居中：cx=%.1f", cx)
+	}
+	// 背景框从 y=44 开始，高度约 31，中心在 59 左右。
+	if cy < 52 || cy > 68 {
+		t.Fatalf("提示文字没有垂直居中：cy=%.1f", cy)
+	}
+}
+
+// 选区尺寸文字要落在黑色背景框里，不能跑到框下面。
+func TestSelSizeLabelInsideBox(t *testing.T) {
+	s := newTestSession()
+	tt := ui.NewTester(s.view, 400, 300)
+	// 选区贴着顶部，标签会放进选区内部：框在 (40,14) 起、84×18
+	dragSel(tt, 40, 10, 300, 200)
+	tt.Frame()
+	img := tt.Image()
+	if img == nil {
+		t.Fatal("渲染结果为空")
+	}
+
+	x0, y0, x1, y1 := 1<<30, 1<<30, -1, -1
+	for y := 14; y < 32; y++ {
+		for x := 40; x < 124; x++ {
+			r, g, b, _ := img.At(x, y).RGBA()
+			if r>>8 > 200 && g>>8 > 200 && b>>8 > 200 {
+				if x < x0 {
+					x0 = x
+				}
+				if y < y0 {
+					y0 = y
+				}
+				if x > x1 {
+					x1 = x
+				}
+				if y > y1 {
+					y1 = y
+				}
+			}
+		}
+	}
+	if x1 < 0 {
+		t.Fatal("没有找到尺寸文字")
+	}
+	// 文字必须完整落在框内（y 14..31）
+	if y0 < 14 || y1 > 31 {
+		t.Fatalf("尺寸文字超出背景框：文字 y=%d..%d，框 y=14..31", y0, y1)
+	}
+}
+
+// 左键双击选区：直接复制（不经过工具栏，也不要求当前是选择工具）。
+func TestDoubleClickCopiesSelection(t *testing.T) {
+	s := newTestSession()
+	tt := ui.NewTester(s.view, 400, 300)
+	dragSel(tt, 40, 40, 260, 200)
+	if !s.hasSel {
+		t.Fatalf("框选失败：%+v", s.sel)
+	}
+
+	tt.ClickAt(150, 120)
+	tt.ClickAt(150, 120)
+	if s.pending == nil || *s.pending != actCopy {
+		t.Fatalf("双击没有触发复制，pending=%v", s.pending)
+	}
+}
+
+// ESC 退出截图（文字编辑中也不例外）。
+func TestEscapeExitsCapture(t *testing.T) {
+	s := newTestSession()
+	tt := ui.NewTester(s.view, 400, 300)
+	tt.Frame()
+
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if !s.closed {
+		t.Fatal("按 ESC 没有退出截图")
+	}
+}
+
+// 文字编辑中按 ESC 也退出截图。
+func TestEscapeWhileEditingExitsCapture(t *testing.T) {
+	s := newTestSession()
+	tt := ui.NewTester(s.view, 400, 300)
+	dragSel(tt, 20, 20, 300, 220)
+
+	s.tool = "text"
+	tt.ClickAt(60, 60)
+	tt.Type("你好")
+	if !s.editingText {
+		t.Fatal("没有进入文字输入")
+	}
+
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if !s.closed {
+		t.Fatal("文字编辑中按 ESC 没有退出截图")
+	}
+}
+
+// 背景上右键退出截图。
+func TestRightClickExitsCapture(t *testing.T) {
+	s := newTestSession()
+	tt := ui.NewTester(s.view, 400, 300)
+	tt.Frame()
+
+	tt.RightClickAt(200, 150)
+	if !s.closed {
+		t.Fatal("右键没有退出截图")
+	}
+}
+
+// 工具栏压在背景层之上，右键也必须能退出截图（靠最外层拦截）。
+func TestRightClickOnToolbarExitsCapture(t *testing.T) {
+	s := newTestSession()
+	tt := ui.NewTester(s.view, 400, 300)
+	dragSel(tt, 40, 40, 260, 200)
+
+	r, ok := tt.Find("马赛克")
+	if !ok {
+		t.Fatal("框选后工具栏没有出现")
+	}
+	tt.RightClickAt(r.X+r.W/2, r.Y+r.H/2)
+	if !s.closed {
+		t.Fatal("在工具栏上右键没有退出截图")
+	}
+}
+
+// 最外层拦截右键，但不能影响工具栏的普通点击。
+func TestToolbarClickStillWorks(t *testing.T) {
+	s := newTestSession()
+	tt := ui.NewTester(s.view, 400, 300)
+	dragSel(tt, 40, 40, 260, 200)
+
+	if err := tt.Click("矩形"); err != nil {
+		t.Fatal(err)
+	}
+	if s.tool != "rect" {
+		t.Fatalf("点击工具栏没有切换工具：%s", s.tool)
+	}
+}
+
+// 文字输入完点别处就落笔，不需要按回车。
+func TestTextCommitsOnClickAway(t *testing.T) {
+	s := newTestSession()
+	tt := ui.NewTester(s.view, 400, 300)
+	dragSel(tt, 20, 20, 300, 220)
+
+	s.tool = "text"
+	tt.ClickAt(60, 60)
+	if !s.editingText {
+		t.Fatal("点选区内没有进入文字输入")
+	}
+	tt.Type("你好")
+	if s.textValue != "你好" {
+		t.Fatalf("输入没有进入编辑框：%q", s.textValue)
+	}
+
+	// 点到选区外（避开工具栏）→ 自动落笔
+	tt.ClickAt(350, 10)
+	if s.editingText {
+		t.Fatal("点击别处后仍处于编辑状态")
+	}
+	if len(s.marks) != 1 || s.marks[0].kind != mkText || s.marks[0].text != "你好" {
+		t.Fatalf("文字没有自动保存：%+v", s.marks)
+	}
+}
+
+// 文字落笔后要停在输入时的位置：比对输入框里的字和提交后的字的像素位置。
+func TestTextMarkStaysWhereTyped(t *testing.T) {
+	s := newTestSession()
+	tt := ui.NewTester(s.view, 400, 300)
+	dragSel(tt, 20, 20, 300, 220)
+
+	s.tool = "text"
+	tt.ClickAt(60, 60)
+	tt.Type("MMMM")
+	tt.Frame()
+
+	// 只看点击位置周围，避开工具栏里的红色色块
+	topLeft := func() (int, int) {
+		img := tt.Image()
+		x0, y0 := 1<<30, 1<<30
+		for y := 30; y < 150; y++ {
+			for x := 30; x < 300; x++ {
+				r, g, b, _ := img.At(x, y).RGBA()
+				if r>>8 > 150 && g>>8 < 110 && b>>8 < 110 {
+					if x < x0 {
+						x0 = x
+					}
+					if y < y0 {
+						y0 = y
+					}
+				}
+			}
+		}
+		return x0, y0
+	}
+
+	ex, ey := topLeft()
+	if ex == 1<<30 {
+		t.Fatal("输入框里的文字没有渲染出来")
+	}
+	s.commitText()
+	tt.Frame()
+	cx, cy := topLeft()
+	if cx == 1<<30 {
+		t.Fatal("提交后的文字没有渲染出来")
+	}
+	abs := func(v int) int {
+		if v < 0 {
+			return -v
+		}
+		return v
+	}
+	if abs(cx-ex) > 2 || abs(cy-ey) > 2 {
+		t.Fatalf("文字落笔后位置变了：输入 (%d,%d) → 提交 (%d,%d)", ex, ey, cx, cy)
 	}
 }
 
