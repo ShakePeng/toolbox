@@ -1,0 +1,21 @@
+modules.go
+  s_da5e8b813d731d::t_3af83d3c0575ec 13,23-30,37,39-42,52,54-60
+theme.go
+  s_da5e8b813d731d::t_4d7e646fc9f99f 52-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "a366c54e62792964900d477503f972436aa09d11",
+  "prompts": {},
+  "sessions": {
+    "s_da5e8b813d731d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704537bf-70c0-4d0c-a78d-8104669acf3f",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
