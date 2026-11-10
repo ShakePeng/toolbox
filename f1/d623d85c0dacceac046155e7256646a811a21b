@@ -1,0 +1,23 @@
+app.go
+  s_da5e8b813d731d::t_949ed1146f9f05 44-46
+capture.go
+  s_da5e8b813d731d::t_63edd7aef1c495 195-199
+main.go
+  s_da5e8b813d731d::t_3f5785d3f7344a 25-27,52,54-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "f1d623d85c0dacceac046155e7256646a811a21b",
+  "prompts": {},
+  "sessions": {
+    "s_da5e8b813d731d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704537bf-70c0-4d0c-a78d-8104669acf3f",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
