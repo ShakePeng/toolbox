@@ -41,6 +41,9 @@ type app struct {
 
 	toastMsg string
 
+	// quitting 表示应用正在退出，窗口的关闭拦截要让路。
+	quitting bool
+
 	registered map[string]string
 
 	capture *captureSession

@@ -192,6 +192,11 @@ func (a *app) openCaptureOverlay(disp mygo.Display, area mygo.Rectangle, pngData
 	})
 	s.win.SetVisibleOnAllWorkspaces(true)
 	s.win.OnClose(func(e *mygo.CloseEvent) {
+		if s.app.quitting {
+			s.closed = true
+			s.app.capture = nil
+			return
+		}
 		e.PreventDefault()
 		s.cancel()
 	})

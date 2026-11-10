@@ -22,8 +22,10 @@ func main() {
 	mygo.App.SetName(appName)
 	// 关窗不退出：应用常驻托盘。
 	mygo.App.OnWindowAllClosed(func() {})
+	// 退出前先记下来：窗口的 OnClose 里要区分“用户关窗（隐藏）”和“应用退出（真关）”，
+	// 否则 PreventDefault 会拦掉退出流程，导致点退出没反应。
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { a.quitting = true })
 	mygo.App.OnSecondInstance(func([]string, string) { a.showMain() })
-	mygo.App.OnWillQuit(func(*mygo.QuitEvent) { a.destroyTray() })
 	mygo.App.WhenReady(a.ready)
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
@@ -47,8 +49,11 @@ func (a *app) ready() {
 		StateKey: "main",
 		Content:  ui.View(a.view),
 	})
-	// 关闭即隐藏，保留界面状态。
+	// 关闭即隐藏，保留界面状态；应用真正退出时放行。
 	a.win.OnClose(func(e *mygo.CloseEvent) {
+		if a.quitting {
+			return
+		}
 		e.PreventDefault()
 		a.win.Hide()
 	})
@@ -125,11 +130,4 @@ func (a *app) setUpTray() {
 		defer tray.SetMenu(nil)
 		tray.PopUpMenu()
 	})
-}
-
-func (a *app) destroyTray() {
-	if a.tray != nil {
-		a.tray.Destroy()
-		a.tray = nil
-	}
 }
