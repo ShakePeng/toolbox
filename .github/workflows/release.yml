@@ -72,14 +72,81 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # 没有 Developer ID 证书时用 ad-hoc 签名（覆盖 mygo.json 里的本地自签身份）。
-      # 用户下载后首次启动需要「右键 → 打开」或在终端执行一次
-      # xattr -dr com.apple.quarantine。配上证书后把这行换成 -sign "<Developer ID ...>"。
+      # 用仓库里的固定自签名证书，而不是 ad-hoc。
+      # ad-hoc 的 designated requirement 是 cdhash，每次构建都变，更新后会丢
+      # 屏幕录制/辅助功能授权；固定证书的 DR 是 bundle id + 证书指纹，跨版本稳定。
+      - name: 导入签名证书
+        env:
+          TOOLBOX_SIGNING_P12_PASSWORD: toolbox-local-dev
+        run: |
+          set -euo pipefail
+
+          expected_sha1="1bda019447623096dbaf37354a7741f69151d8cb"
+          actual_sha1="$(/usr/bin/openssl x509 -in signing/toolbox-signing.cer \
+            -noout -fingerprint -sha1 | sed 's/.*=//;s/://g' | tr 'A-F' 'a-f')"
+          [ "$actual_sha1" = "$expected_sha1" ] || {
+            echo "仓库证书指纹不符：$actual_sha1" >&2
+            exit 1
+          }
+
+          keychain="$RUNNER_TEMP/toolbox-signing.keychain-db"
+          keychain_password="$(/usr/bin/openssl rand -hex 24)"
+
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+
+          security import signing/toolbox-signing.p12 -k "$keychain" -f pkcs12 \
+            -P "$TOOLBOX_SIGNING_P12_PASSWORD" -T /usr/bin/codesign
+
+          security set-key-partition-list \
+            -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+
+          # 自签名证书未信任时 security find-identity 可能返回 0 个有效身份。
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign \
+            -k /Library/Keychains/System.keychain signing/toolbox-signing.cer
+
+          security list-keychains -d user -s "$keychain" \
+            "$HOME/Library/Keychains/login.keychain-db"
+
+          security find-identity -v -p codesigning "$keychain"
+          security find-identity -v -p codesigning "$keychain" |
+            grep -Fq '"Toolbox Local Dev"'
+
       - name: 构建并上传（app + dmg + 签名更新包）
         env:
           GH_TOKEN: ${{ github.token }}
           MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
-        run: go tool mygo build -platform "darwin/arm64,darwin/amd64" -sign - -upload
+        run: |
+          set -euo pipefail
+
+          identity="Toolbox Local Dev"
+          expected_leaf='certificate leaf = H"1bda019447623096dbaf37354a7741f69151d8cb"'
+
+          go tool mygo build \
+            -platform "darwin/arm64,darwin/amd64" \
+            -sign "$identity" \
+            -upload
+
+          # 校验产物真的是固定证书签名，而不是回落到 ad-hoc（cdhash）。
+          for app in build/darwin-*/toolbox.app; do
+            dr="$(codesign -d -r- "$app" 2>&1)"
+            echo "$app"
+            echo "$dr"
+            echo "$dr" | grep -Fq 'identifier "com.example.toolbox"'
+            echo "$dr" | grep -Fq "$expected_leaf"
+            if echo "$dr" | grep -q 'cdhash'; then
+              echo "$app 仍是 ad-hoc 签名（DR 为 cdhash）" >&2
+              exit 1
+            fi
+            codesign --verify --deep --strict "$app"
+            codesign -dvvv "$app" 2>&1 | grep -Fq "Authority=$identity"
+          done
+
+          for dmg in build/darwin-*/*.dmg; do
+            codesign --verify "$dmg"
+            codesign -dvv "$dmg" 2>&1 | grep -Fq "Authority=$identity"
+          done
 
   publish:
     needs: build

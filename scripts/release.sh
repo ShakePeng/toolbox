@@ -63,7 +63,7 @@ key="${HOME}/Library/Application Support/mygo/update-keys/mygo-update.key"
 if [ -f "$key" ]; then
 	echo "密钥   $key"
 else
-	echo "提示   本地没有 $key；CI 发布需要仓库 secret MYGO_UPDATER_PRIVATE_KEY"
+	echo "提示   本地没有 ${key}；CI 发布需要仓库 secret MYGO_UPDATER_PRIVATE_KEY"
 fi
 
 if [ "$PUSH" -eq 0 ]; then

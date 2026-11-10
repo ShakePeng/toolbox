@@ -5,3 +5,9 @@ mygo_windows_*.syso
 # 本地构建产物与系统文件
 /toolbox
 .DS_Store
+
+# 签名材料的临时文件（toolbox-signing.p12 需要提交，不要忽略）
+/signing/tmp/
+/signing/*.key
+/signing/*.pem
+
