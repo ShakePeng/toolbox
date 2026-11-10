@@ -5,7 +5,8 @@
   "out": "build",
   "updates": {
     "publicKey": "pYVqpPOTgfNGfIWcbHh7veS7Bm8c8Ti6ink+1y3TWz0=",
-    "github": "ShakePeng/toolbox"
+    "github": "ShakePeng/toolbox",
+    "deltas": 0
   },
   "macos": {
     "signingIdentity": "Toolbox Local Dev"

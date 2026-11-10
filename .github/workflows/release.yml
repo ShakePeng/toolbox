@@ -123,8 +123,9 @@ jobs:
           identity="Toolbox Local Dev"
           expected_leaf='certificate leaf = H"1bda019447623096dbaf37354a7741f69151d8cb"'
 
+          # 只发布 Apple Silicon（arm64）版本。
           go tool mygo build \
-            -platform "darwin/arm64,darwin/amd64" \
+            -platform "darwin/arm64" \
             -sign "$identity" \
             -upload
 
