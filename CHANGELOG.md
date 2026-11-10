@@ -8,6 +8,11 @@
 - Windows：支持划词翻译。模拟 `Ctrl+C` 读取当前选区，读完恢复原剪贴板；不再显示 macOS 的辅助功能、屏幕录制授权提示。
 - Windows：发布 `toolbox-setup-1.0.6-amd64.exe` 安装包（NSIS），并支持从 GitHub Release 自动更新。
 
+### 修复
+
+- Windows：录制 `Ctrl+…` 快捷键时不再多出 `Cmd`。此前会录成 `Cmd+Ctrl+…`，而 `Cmd` 在 Windows 上被当作 Win 键，导致快捷键注册失败。
+- 划词翻译：修正浮窗高度计算，底部留白不再被裁切，卡片与浮窗边框的间距保持一致。
+
 ### 说明
 
 - Windows 版本面向 Windows 10/11 x64。

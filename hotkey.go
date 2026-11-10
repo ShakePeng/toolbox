@@ -46,7 +46,10 @@ func isFunctionKey(name string) bool {
 // modPrefixes 把当前按下的修饰键转成 accelerator 前缀，顺序固定。
 func modPrefixes(m ui.Modifiers) []string {
 	var out []string
-	if m&ui.Cmd != 0 {
+	// ui.Cmd 在 macOS 上是 Command，在 Windows/Linux 上等于 Ctrl。
+	// 非 macOS 再输出 "Cmd" 会得到 Cmd+Ctrl+… 这种重复修饰键，且 "Cmd"
+	// 会被解析成 Win 键，导致快捷键注册不上。
+	if runtime.GOOS == "darwin" && m&ui.Cmd != 0 {
 		out = append(out, "Cmd")
 	}
 	if m&ui.Ctrl != 0 {

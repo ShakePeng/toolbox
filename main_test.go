@@ -2,6 +2,7 @@ package main
 
 import (
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -73,6 +74,19 @@ func TestFormatHotkey(t *testing.T) {
 	}
 	if formatHotkey("") != "未设置" {
 		t.Errorf("空快捷键应显示“未设置”")
+	}
+}
+
+// 录制快捷键时，非 macOS 的 Ctrl 不能被格式化成 Cmd+Ctrl：
+// mygo 里 ui.Cmd 在 Windows/Linux 上就是 Ctrl。
+func TestModPrefixesCtrl(t *testing.T) {
+	if got := strings.Join(modPrefixes(ui.Ctrl|ui.Alt), "+"); got != "Ctrl+Alt" {
+		t.Errorf("Ctrl+Alt 应格式化为 Ctrl+Alt，实际 %q", got)
+	}
+	if runtime.GOOS == "darwin" {
+		if got := strings.Join(modPrefixes(ui.Cmd|ui.Shift), "+"); got != "Cmd+Shift" {
+			t.Errorf("macOS 下 Cmd+Shift 应格式化为 Cmd+Shift，实际 %q", got)
+		}
 	}
 }
 

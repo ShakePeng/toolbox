@@ -314,33 +314,38 @@ func (s *translationSession) fitHeight() {
 	if s.win == nil {
 		return
 	}
-	h := 52 + 40 + 16 // 头部 + 底部 + 上下留白
+	// 逐项累加实际占位：窗口上下边框 2、头部 56、头尾两条分隔线 2、底部 40。
+	// 头部 MinHeight 是 52，但两行文字会把实际高度撑到约 56；旧公式按 52 估算，
+	// 少算的几像素让 body 溢出，Scroll 会裁掉 results 底部的 10px 内边距。
+	h := 2 + 56 + 1 + 1 + 40
 	if s.editing {
-		h += 138
+		h += 10 + 136 // 原文编辑卡：上外边距 + 卡片
 	} else if s.source != "" {
-		h += 58
+		h += 10 + 50 // 原文预览卡
 	}
 	if s.notice != "" {
-		h += 56
+		h += 9 + 38 // 提示条
 	}
 	if len(s.results) > 0 {
-		h += 8
-		for _, r := range s.results {
-			h += resultCardHeight(r) + 8
+		h += 10 // results 上内边距
+		for i, r := range s.results {
+			if i > 0 {
+				h += 8 // 卡片间距
+			}
+			h += resultCardHeight(r)
 		}
+		h += 10 // results 下内边距
 	}
 	h = max(translationMinHeight, min(h, translationMaxHeight))
 	s.win.SetSize(translationWidth, h)
 }
 
 func resultCardHeight(r translationResult) int {
-	if r.Loading || r.Err != "" {
-		return 84
+	if r.Loading || r.Err != "" || r.Text == "" {
+		return 88
 	}
-	if r.Text == "" {
-		return 72
-	}
-	return 62 + estimateLines(r.Text)*24
+	// 70 = 上下 padding + 服务标题行 + 译文上边距；每行译文约 24。
+	return 70 + estimateLines(r.Text)*24
 }
 
 // estimateLines 粗略按“中文 2 个宽度单位、其他 1 个”估算换行后的行数。
@@ -546,7 +551,7 @@ func (s *translationSession) noticeSection(c *ui.Context) {
 		border, bg, fg = ui.RGBA(74, 222, 128, 0.18), ui.RGBA(74, 222, 128, 0.09), colSuccess
 		iconName = "check"
 	}
-	ui.Row(c).Margin(9, 10, 10, 10).Padding(9, 10).Radius(9).Border(1, border).
+	ui.Row(c).Margin(9, 10, 0, 10).Padding(9, 10).Radius(9).Border(1, border).
 		Background(bg).AlignItems(ui.Center).Gap(7).Children(func() {
 		ui.Icon(c, icon(iconName)).FontSize(14).TextColor(fg)
 		ui.Text(c, s.notice).Grow(1).MinWidth(0).FontSize(12).TextColor(fg).LineHeight(1.45)
