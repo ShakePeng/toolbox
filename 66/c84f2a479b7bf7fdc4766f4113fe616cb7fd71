@@ -1,0 +1,19 @@
+scripts/release.sh
+  s_da5e8b813d731d::t_a2040068d1f472 80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "66c84f2a479b7bf7fdc4766f4113fe616cb7fd71",
+  "prompts": {},
+  "sessions": {
+    "s_da5e8b813d731d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704537bf-70c0-4d0c-a78d-8104669acf3f",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
