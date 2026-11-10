@@ -1,0 +1,23 @@
+.github/workflows/release.yml
+  s_5a727a1a7d9bda::t_0588e78700eaa2 126,128
+CHANGELOG.md
+  s_5a727a1a7d9bda::t_f7c784ea10ce8b 23
+mygo.json
+  s_5a727a1a7d9bda::t_43ed273b2260c6 8-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "76a2b7e6f570ef558f349c13881d0ea92d083dd4",
+  "prompts": {},
+  "sessions": {
+    "s_5a727a1a7d9bda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8049c1d3-c7f4-4ada-a7e2-a000ed876703",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
