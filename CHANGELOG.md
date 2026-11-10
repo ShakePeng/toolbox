@@ -1,5 +1,20 @@
 # 更新日志
 
+## 1.0.6
+
+### 新增
+
+- Windows：支持截图与标注。使用 GDI 直接捕获当前显示器，无需系统授权；多显示器下按光标所在屏幕截图。
+- Windows：支持划词翻译。模拟 `Ctrl+C` 读取当前选区，读完恢复原剪贴板；不再显示 macOS 的辅助功能、屏幕录制授权提示。
+- Windows：发布 `toolbox-setup-1.0.6-amd64.exe` 安装包（NSIS），并支持从 GitHub Release 自动更新。
+
+### 说明
+
+- Windows 版本面向 Windows 10/11 x64。
+- Windows 安装包未做代码签名，首次运行可能出现 SmartScreen 提示，选择“更多信息 → 仍要运行”即可。
+- Windows 划词通过模拟 `Ctrl+C` 读取选区，以管理员权限运行的应用可能无法读取。
+- macOS 版本仍只提供 Apple Silicon（arm64）。
+
 ## 1.0.5
 
 ### 新增

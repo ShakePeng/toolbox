@@ -63,7 +63,7 @@ jobs:
 
   build:
     needs: draft-release
-    name: macOS
+    name: macOS + Windows
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -71,6 +71,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+
+      # mygo 在非 Windows 上不会自动下载 NSIS，需要本机有 makensis。
+      # Windows 安装包由这里一起构建，避免再开一个 Windows runner。
+      - name: 安装 NSIS（Windows 安装包）
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+        run: |
+          if ! command -v makensis >/dev/null 2>&1; then
+            brew install makensis
+          fi
+          makensis -VERSION
 
       # 用仓库里的固定自签名证书，而不是 ad-hoc。
       # ad-hoc 的 designated requirement 是 cdhash，每次构建都变，更新后会丢
@@ -123,9 +134,9 @@ jobs:
           identity="Toolbox Local Dev"
           expected_leaf='certificate leaf = H"1bda019447623096dbaf37354a7741f69151d8cb"'
 
-          # 只发布 Apple Silicon（arm64）版本。
+          # macOS 只发布 Apple Silicon（arm64）；Windows 同时产出安装包。
           go tool mygo build \
-            -platform "darwin/arm64" \
+            -platform "darwin/arm64,windows/amd64" \
             -sign "$identity" \
             -upload
 
@@ -148,6 +159,11 @@ jobs:
             codesign --verify "$dmg"
             codesign -dvv "$dmg" 2>&1 | grep -Fq "Authority=$identity"
           done
+
+          # Windows 产物的路径和命名由 mygo 固定：可执行文件 + NSIS 安装包。
+          version="$(jq -r .version mygo.json)"
+          test -f build/windows-amd64/toolbox.exe
+          test -f "build/windows-amd64/toolbox-setup-${version}-amd64.exe"
 
   publish:
     needs: build

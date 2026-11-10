@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"runtime"
 	"strings"
 	"time"
 
@@ -350,7 +351,10 @@ func (a *app) translationSection(c *ui.Context) {
 		pill(c, fmt.Sprintf("%d 个服务已启用", enabled), colAccentSoft, colAccentStr)
 	})
 
-	a.permissionStrip(c, "辅助功能权限", "用于读取当前应用中被选中的文本。", "accessibility", permissions().Accessibility)
+	// 只有 macOS 需要系统授权；Windows 读取选区走模拟 Ctrl+C，没有授权概念。
+	if runtime.GOOS == "darwin" {
+		a.permissionStrip(c, "辅助功能权限", "用于读取当前应用中被选中的文本。", "accessibility", permissions().Accessibility)
+	}
 
 	hotkeyBody := func() { a.hotkeyRecorder(c, "translate") }
 	langBody := func() { a.langSelect(c) }
@@ -447,7 +451,10 @@ func (a *app) screenshotSection(c *ui.Context) {
 		}
 	})
 
-	a.permissionStrip(c, "屏幕录制权限", "用于捕获当前显示器画面并进入标注编辑。", "screenRecording", permissions().ScreenRecording)
+	// Windows 的屏幕捕获不需要授权。
+	if runtime.GOOS == "darwin" {
+		a.permissionStrip(c, "屏幕录制权限", "用于捕获当前显示器画面并进入标注编辑。", "screenRecording", permissions().ScreenRecording)
+	}
 
 	a.captureConfigPanel(c)
 }

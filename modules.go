@@ -25,7 +25,7 @@ func appVersion() string {
 	if v := mygo.App.Version(); v != "" {
 		return v
 	}
-	return "1.0.5"
+	return "1.0.6"
 }
 
 // PermissionStatus 是插件所需系统权限的快照。
@@ -52,8 +52,9 @@ func (a *app) startTranslation() {
 		a.translationNotice("请先在翻译页配置并启用至少一个翻译服务", false)
 		return
 	}
-	// 选区读取依赖辅助功能；没有权限时直接提示，避免 AX 返回难懂的错误码。
-	if !permissionflow.Allowed(permissionflow.Accessibility) {
+	// macOS 的选区读取依赖辅助功能；没有权限时直接提示，避免 AX 返回难懂的错误码。
+	// Windows 走模拟 Ctrl+C，不需要授权。
+	if runtime.GOOS == "darwin" && !permissionflow.Allowed(permissionflow.Accessibility) {
 		a.translationNotice("需要辅助功能权限才能读取选中文本，请到翻译页授权", true)
 		return
 	}
