@@ -63,7 +63,9 @@ jobs:
 
   test:
     name: 测试
-    runs-on: ubuntu-latest
+    # 截图/翻译的渲染断言依赖系统中文字体，ubuntu runner 默认没有，
+    # 放在 macOS 上跑，和实际构建环境一致。
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
