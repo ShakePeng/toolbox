@@ -6,7 +6,7 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// iconPNG 是应用图标（沿用原项目的 icon.png，用于侧栏品牌位与更新卡片）。
+// iconPNG 是应用图标（工具箱造型，与状态栏图标一致），用于侧栏品牌位与更新卡片。
 //
 //go:embed resources/icon.png
 var iconPNG []byte
