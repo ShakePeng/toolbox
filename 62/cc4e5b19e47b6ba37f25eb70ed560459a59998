@@ -1,0 +1,39 @@
+app.go
+  s_5a727a1a7d9bda::t_8deb5b5413a82b 50-51
+icons.go
+  s_5a727a1a7d9bda::t_4c73d8bcd870cb 16-44
+modules.go
+  s_5a727a1a7d9bda::t_fcc2cddfd71ba3 28,45,47-82
+mygo.json
+  s_5a727a1a7d9bda::t_ffca3c94527fc1 4
+provider.go
+  s_5a727a1a7d9bda::t_7285643bcbd6c1 85
+selection_clipboard_darwin.go
+  s_5a727a1a7d9bda::t_65cdd4e72ee9c9 1-104
+selection_other.go
+  s_5a727a1a7d9bda::t_278d8e542f7ac9 1-11
+translate.go
+  s_5a727a1a7d9bda::t_f2b99e0852feda 1-478
+translate_test.go
+  s_5a727a1a7d9bda::t_ccdacec32548eb 1-214
+translation_window.go
+  s_5a727a1a7d9bda::t_769a97bb695de9 1-676
+translation_window_test.go
+  s_5a727a1a7d9bda::t_b3650ea881f7af 1-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "62cc4e5b19e47b6ba37f25eb70ed560459a59998",
+  "prompts": {},
+  "sessions": {
+    "s_5a727a1a7d9bda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8049c1d3-c7f4-4ada-a7e2-a000ed876703",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
