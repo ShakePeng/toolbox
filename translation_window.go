@@ -65,6 +65,7 @@ func newTranslationSession(a *app) *translationSession {
 		DisableFullScreen: true,
 		Content:           ui.View(s.view),
 	})
+	hideNativeWindowBorder(s.win.NativeHandle())
 	s.win.OnBlur(func() {
 		// 应用退出过程中不再拦焦点，交给系统关闭窗口。
 		if s.app.quitting {
@@ -283,6 +284,7 @@ func (s *translationSession) show() {
 
 	s.win.SetPosition(x, y)
 	s.win.Show()
+	hideNativeWindowBorder(s.win.NativeHandle())
 	s.win.Focus()
 }
 

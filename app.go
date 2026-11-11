@@ -52,6 +52,18 @@ type app struct {
 	pins []*pinWindow
 	// trans 是复用的划词翻译浮窗，首次划词时创建。
 	trans *translationSession
+	// launcher 是复用的快速启动浮窗，首次唤起时创建。
+	launcher *launcherSession
+	// vscode 保存自定义命令的探测结果，供启动页和项目模式使用。
+	vscode vscodeState
+}
+
+// refreshMain 让主窗口重绘。后台加载完成后用它同步设置页的状态。
+func (a *app) refreshMain() {
+	if a.win == nil || a.quitting {
+		return
+	}
+	a.win.Update(func() {})
 }
 
 type sectionItem struct {
@@ -96,8 +108,11 @@ func (a *app) persist() error {
 		}
 		a.configPath = p
 	}
+	// 版本号必须和迁移逻辑保持一致：如果这里仍写 v1，用户关闭搜索源后
+	// 下次启动会被 migrateConfig 重新打开。
+	a.settings.SchemaVersion = configSchemaVersion
 	return saveConfig(a.configPath, Config{
-		SchemaVersion: 1,
+		SchemaVersion: configSchemaVersion,
 		Settings:      a.settings,
 		Providers:     a.providers,
 	})
@@ -211,6 +226,18 @@ func (a *app) providerColumns(c *ui.Context) int {
 	}
 }
 
+// overviewColumns 让三张插件卡在宽屏并排，窄屏堆叠。
+func (a *app) overviewColumns(c *ui.Context) int {
+	switch cw := a.contentWidth(c); {
+	case cw >= 840:
+		return 3
+	case cw >= 560:
+		return 2
+	default:
+		return 1
+	}
+}
+
 func (a *app) sidebar(c *ui.Context) {
 	ui.Column(c).Width(a.sidebarWidth(c)).Shrink(0).Padding(24, 18, 20, 18).Gap(30).
 		Background(ui.RGBA(42, 43, 47, 0.82)).BorderColor(colLine).BorderEndWidth(1).Children(func() {
@@ -283,6 +310,8 @@ func (a *app) content(c *ui.Context) {
 						a.translationSection(c)
 					case "screenshot":
 						a.screenshotSection(c)
+					case "launcher":
+						a.launcherSection(c)
 					case "settings":
 						a.settingsSection(c)
 					}
@@ -296,19 +325,40 @@ func (a *app) content(c *ui.Context) {
 
 func (a *app) overviewSection(c *ui.Context) {
 	a.intro(c, "PLUGINS", "插件概览", "按需启用插件。关闭后隐藏对应 Tab，并注销插件快捷键。", nil)
-	if a.twoColumn(c) {
-		ui.Row(c).Gap(14).AlignItems(ui.Stretch).Children(func() {
-			a.featureCard(c, "translate", "划词翻译", "在任意应用中选中文本，通过快捷键打开翻译浮窗。",
-				&a.settings.TranslationEnabled, "translation").Grow(1)
-			a.featureCard(c, "screenshot", "截图标注", "捕获当前屏幕，完成标注、复制和保存。",
-				&a.settings.ScreenshotEnabled, "screenshot").Grow(1)
-		})
-	} else {
+	cards := []struct {
+		iconName string
+		title    string
+		desc     string
+		on       *bool
+		kind     string
+	}{
+		{"translate", "划词翻译", "在任意应用中选中文本，通过快捷键打开翻译浮窗。",
+			&a.settings.TranslationEnabled, "translation"},
+		{"screenshot", "截图标注", "捕获当前屏幕，完成标注、复制和保存。",
+			&a.settings.ScreenshotEnabled, "screenshot"},
+		{"launcher", "快速启动", "按快捷键唤起搜索浮窗，打开应用和常用文件。",
+			&a.settings.LauncherEnabled, "launcher"},
+	}
+
+	cols := a.overviewColumns(c)
+	if cols <= 1 {
 		ui.Column(c).Gap(14).Children(func() {
-			a.featureCard(c, "translate", "划词翻译", "在任意应用中选中文本，通过快捷键打开翻译浮窗。",
-				&a.settings.TranslationEnabled, "translation")
-			a.featureCard(c, "screenshot", "截图标注", "捕获当前屏幕，完成标注、复制和保存。",
-				&a.settings.ScreenshotEnabled, "screenshot")
+			for _, card := range cards {
+				a.featureCard(c, card.iconName, card.title, card.desc, card.on, card.kind)
+			}
+		})
+		return
+	}
+	for i := 0; i < len(cards); i += cols {
+		end := min(i+cols, len(cards))
+		ui.Row(c).Gap(14).AlignItems(ui.Stretch).Children(func() {
+			for j := i; j < end; j++ {
+				card := cards[j]
+				a.featureCard(c, card.iconName, card.title, card.desc, card.on, card.kind).Grow(1)
+			}
+			for k := end - i; k < cols; k++ {
+				ui.Box(c).Grow(1)
+			}
 		})
 	}
 }
@@ -632,10 +682,12 @@ func (a *app) hotkeyRecorder(c *ui.Context, slot string) {
 					switch err := a.persist(); {
 					case err != nil:
 						a.toast("保存失败：" + err.Error())
-					case a.settings.Hotkeys.Translate == a.settings.Hotkeys.Screenshot:
-						a.toast("提示：两个插件使用了相同快捷键，可能相互冲突")
 					default:
-						a.toast("快捷键已更新：" + formatHotkey(acc))
+						if other, ok := a.findHotkeyConflict(slot); ok {
+							a.toast("提示：该快捷键与「" + other + "」重复，可能相互冲突")
+						} else {
+							a.toast("快捷键已更新：" + formatHotkey(acc))
+						}
 					}
 				}
 			} else if secondaryBtn(c, "录制").Clicked() {
@@ -701,6 +753,9 @@ func (a *app) visibleSections() []sectionItem {
 	if a.settings.ScreenshotEnabled {
 		items = append(items, sectionItem{"screenshot", "截图", "screenshot"})
 	}
+	if a.settings.LauncherEnabled {
+		items = append(items, sectionItem{"launcher", "启动", "launcher"})
+	}
 	items = append(items, sectionItem{"settings", "设置", "settings"})
 	return items
 }
@@ -715,18 +770,50 @@ func (a *app) sectionVisible(id string) bool {
 }
 
 func (a *app) currentHotkey(slot string) string {
-	if slot == "translate" {
+	switch slot {
+	case "translate":
 		return a.settings.Hotkeys.Translate
+	case "screenshot":
+		return a.settings.Hotkeys.Screenshot
+	case "launcher":
+		return a.settings.Hotkeys.Launcher
 	}
-	return a.settings.Hotkeys.Screenshot
+	return ""
 }
 
 func (a *app) setHotkey(slot, acc string) {
-	if slot == "translate" {
+	switch slot {
+	case "translate":
 		a.settings.Hotkeys.Translate = acc
-	} else {
+	case "screenshot":
 		a.settings.Hotkeys.Screenshot = acc
+	case "launcher":
+		a.settings.Hotkeys.Launcher = acc
 	}
+}
+
+// findHotkeyConflict 找出与 slot 新快捷键重复的其他插件。空值不参与比较，
+// 否则两个都未设置的插件会被误报冲突。
+func (a *app) findHotkeyConflict(slot string) (string, bool) {
+	acc := a.currentHotkey(slot)
+	if acc == "" {
+		return "", false
+	}
+	others := []struct{ slot, label string }{
+		{"translate", "划词翻译"},
+		{"screenshot", "截图标注"},
+		{"launcher", "快速启动"},
+	}
+	for _, o := range others {
+		if o.slot == slot {
+			continue
+		}
+		other := a.currentHotkey(o.slot)
+		if other != "" && strings.EqualFold(other, acc) {
+			return o.label, true
+		}
+	}
+	return "", false
 }
 
 func (a *app) afterFeatureChange(kind string) {
@@ -738,15 +825,33 @@ func (a *app) afterFeatureChange(kind string) {
 		return
 	}
 	a.registerHotkeys()
-	label, on := "划词翻译", a.settings.TranslationEnabled
-	if kind == "screenshot" {
-		label, on = "截图标注", a.settings.ScreenshotEnabled
+	if kind == "launcher" && !a.settings.LauncherEnabled {
+		a.disposeLauncher()
 	}
-	if on {
+	if kind == "launcher" && a.settings.LauncherEnabled && a.settings.LauncherVSCodeEnabled {
+		a.detectVSCodeCommand()
+	}
+	label, on := a.featureMeta(kind)
+	switch {
+	case on && kind == "launcher" && a.settings.Hotkeys.Launcher == "":
+		a.toast(label + " 已开启，请到「启动」页录制快捷键")
+	case on:
 		a.toast(label + " 已开启")
-	} else {
+	default:
 		a.toast(label + " 已关闭")
 	}
+}
+
+func (a *app) featureMeta(kind string) (string, bool) {
+	switch kind {
+	case "translate":
+		return "划词翻译", a.settings.TranslationEnabled
+	case "screenshot":
+		return "截图标注", a.settings.ScreenshotEnabled
+	case "launcher":
+		return "快速启动", a.settings.LauncherEnabled
+	}
+	return "", false
 }
 
 func (a *app) afterProviderChange() {
@@ -813,6 +918,9 @@ func (a *app) registerHotkeys() {
 	}
 	if err := a.ensureHotkey("screenshot", a.settings.ScreenshotEnabled, a.settings.Hotkeys.Screenshot, a.startCapture); err != nil {
 		failed = append(failed, a.settings.Hotkeys.Screenshot)
+	}
+	if err := a.ensureHotkey("launcher", a.settings.LauncherEnabled, a.settings.Hotkeys.Launcher, a.startLauncher); err != nil {
+		failed = append(failed, a.settings.Hotkeys.Launcher)
 	}
 	if len(failed) > 0 {
 		// 注册失败以前只写日志，用户会以为功能坏了。

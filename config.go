@@ -46,6 +46,21 @@ func migrateConfig(cfg *Config) {
 	if cfg.SchemaVersion == 0 {
 		cfg.SchemaVersion = 1
 	}
+	// v1 没有启动器的搜索源字段。bool 零值无法区分“字段缺失”和“用户关闭”，
+	// 所以只在 v1 配置上补默认值；用户关闭后 persist 会写成新版本，不再被覆盖。
+	if cfg.SchemaVersion < 2 {
+		cfg.Settings.LauncherSearchApps = true
+		cfg.Settings.LauncherSearchFiles = true
+	}
+	// v2 没有 VSCode 自定义命令字段；命令留空时按 code 处理。
+	if cfg.SchemaVersion < 3 {
+		if strings.TrimSpace(cfg.Settings.LauncherVSCodeCommand) == "" {
+			cfg.Settings.LauncherVSCodeCommand = "code"
+		}
+	}
+	cfg.SchemaVersion = configSchemaVersion
+	cfg.Settings.SchemaVersion = configSchemaVersion
+
 	defaults := defaultHotkeys()
 	if cfg.Settings.Hotkeys.Translate == "" {
 		cfg.Settings.Hotkeys.Translate = defaults.Translate

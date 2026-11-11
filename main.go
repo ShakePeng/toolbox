@@ -70,6 +70,11 @@ func (a *app) ready() {
 	a.setUpTray()
 	a.registerHotkeys()
 	a.watchUpdates()
+	// 启动器启用且自定义命令开启时，提前探测 code 命令；
+	// 结果会在后台回来后刷新设置页，不阻塞启动。
+	if a.settings.LauncherEnabled && a.settings.LauncherVSCodeEnabled {
+		a.detectVSCodeCommand()
+	}
 	a.win.Show()
 }
 
@@ -122,6 +127,8 @@ func (a *app) setUpTray() {
 			Click: func(*mygo.MenuItem, *mygo.Window) { a.startTranslation() }},
 		{ID: "tray-capture", Label: "区域截图", Accelerator: a.settings.Hotkeys.Screenshot,
 			Click: func(*mygo.MenuItem, *mygo.Window) { a.startCapture() }},
+		{ID: "tray-launcher", Label: "快速启动", Accelerator: a.settings.Hotkeys.Launcher,
+			Click: func(*mygo.MenuItem, *mygo.Window) { a.startLauncher() }},
 		mygo.Separator(),
 	}
 	if a.updatesOn {
@@ -155,6 +162,8 @@ func (a *app) refreshTrayShortcuts() {
 			acc = a.settings.Hotkeys.Translate
 		case "tray-capture":
 			acc = a.settings.Hotkeys.Screenshot
+		case "tray-launcher":
+			acc = a.settings.Hotkeys.Launcher
 		default:
 			continue
 		}

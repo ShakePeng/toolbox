@@ -8,21 +8,35 @@ import (
 // 本文件对齐原项目（S-Tools）的 Rust 后端（src-tauri/src/models.rs）数据模型，
 // 字段命名沿用 JSON 的 camelCase，方便日后直接迁移旧用户配置。
 
-// HotkeySettings 是两个插件各自绑定的全局快捷键（accelerator 字符串）。
+// configSchemaVersion 是落盘配置的版本。迁移必须按版本逐级判断，
+// 不能只看“小于当前版本”，否则升级到 v3 会把 v2 用户的搜索源选择覆盖掉。
+const configSchemaVersion = 3
+
+// HotkeySettings 是各插件绑定的全局快捷键（accelerator 字符串）。
 type HotkeySettings struct {
 	Translate  string `json:"translate"`
 	Screenshot string `json:"screenshot"`
+	// Launcher 默认留空：启动器不预设组合键，必须由用户手动录制。
+	Launcher string `json:"launcher"`
 }
 
 // Settings 是应用级设置，对应原 AppSettings。
 type Settings struct {
-	SchemaVersion          int            `json:"schemaVersion"`
-	Hotkeys                HotkeySettings `json:"hotkeys"`
-	TranslationEnabled     bool           `json:"translationEnabled"`
-	ScreenshotEnabled      bool           `json:"screenshotEnabled"`
-	TargetLang             string         `json:"targetLang"`
-	LaunchAtLogin          bool           `json:"launchAtLogin"`
-	HasCompletedOnboarding bool           `json:"hasCompletedOnboarding"`
+	SchemaVersion       int            `json:"schemaVersion"`
+	Hotkeys             HotkeySettings `json:"hotkeys"`
+	TranslationEnabled  bool           `json:"translationEnabled"`
+	ScreenshotEnabled   bool           `json:"screenshotEnabled"`
+	LauncherEnabled     bool           `json:"launcherEnabled"`
+	LauncherSearchApps  bool           `json:"launcherSearchApps"`
+	LauncherSearchFiles bool           `json:"launcherSearchFiles"`
+	// LauncherVSCode 系列字段属于启动器的自定义命令。默认关闭，
+	// 命令留空时按 code 处理，项目文件夹可以配置多个。
+	LauncherVSCodeEnabled  bool     `json:"launcherVSCodeEnabled"`
+	LauncherVSCodeCommand  string   `json:"launcherVSCodeCommand"`
+	LauncherVSCodeFolders  []string `json:"launcherVSCodeFolders"`
+	TargetLang             string   `json:"targetLang"`
+	LaunchAtLogin          bool     `json:"launchAtLogin"`
+	HasCompletedOnboarding bool     `json:"hasCompletedOnboarding"`
 }
 
 // Provider 是一个翻译服务配置，对应原 ProviderConfig / ProviderView。
@@ -63,12 +77,18 @@ func defaultHotkeys() HotkeySettings {
 
 func defaultSettings() Settings {
 	return Settings{
-		SchemaVersion:      1,
-		Hotkeys:            defaultHotkeys(),
-		TranslationEnabled: false,
-		ScreenshotEnabled:  false,
-		TargetLang:         "auto",
-		LaunchAtLogin:      false,
+		SchemaVersion:         configSchemaVersion,
+		Hotkeys:               defaultHotkeys(),
+		TranslationEnabled:    false,
+		ScreenshotEnabled:     false,
+		LauncherEnabled:       false,
+		LauncherSearchApps:    true,
+		LauncherSearchFiles:   true,
+		LauncherVSCodeEnabled: false,
+		LauncherVSCodeCommand: "code",
+		LauncherVSCodeFolders: nil,
+		TargetLang:            "auto",
+		LaunchAtLogin:         false,
 	}
 }
 
@@ -103,7 +123,7 @@ func defaultProviders() []Provider {
 
 func defaultConfig() Config {
 	return Config{
-		SchemaVersion: 1,
+		SchemaVersion: configSchemaVersion,
 		Settings:      defaultSettings(),
 		Providers:     defaultProviders(),
 	}
