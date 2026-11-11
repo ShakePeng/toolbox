@@ -16,6 +16,8 @@ import (
 type app struct {
 	win  *mygo.Window
 	tray *mygo.Tray
+	// trayItems 保存托盘菜单项，快捷键变更后更新对应的快捷键栏。
+	trayItems []*mygo.MenuItem
 
 	configPath string
 	icon       *ui.Bitmap
@@ -816,6 +818,7 @@ func (a *app) registerHotkeys() {
 		// 注册失败以前只写日志，用户会以为功能坏了。
 		a.toast("快捷键注册失败：" + strings.Join(failed, "、") + "，可能已被其他程序占用")
 	}
+	a.refreshTrayShortcuts()
 }
 
 func (a *app) ensureHotkey(slot string, enabled bool, acc string, fn func()) error {

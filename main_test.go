@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -90,6 +91,27 @@ func TestLanguageSelectionPersists(t *testing.T) {
 	}
 	if cfg.Settings.TargetLang != "en" {
 		t.Fatalf("目标语言没有自动保存：%q", cfg.Settings.TargetLang)
+	}
+}
+
+// 托盘菜单跟随最新快捷键，重新录制后无需重启应用。
+func TestRefreshTrayShortcuts(t *testing.T) {
+	a := newTestApp()
+	translate := &mygo.MenuItem{ID: "tray-translate", Label: "划词翻译"}
+	capture := &mygo.MenuItem{ID: "tray-capture", Label: "区域截图"}
+	a.trayItems = []*mygo.MenuItem{translate, capture}
+	a.settings.Hotkeys.Translate = "Cmd+Alt+D"
+	a.settings.Hotkeys.Screenshot = "F1"
+
+	a.refreshTrayShortcuts()
+	if translate.Accelerator != "Cmd+Alt+D" || capture.Accelerator != "F1" {
+		t.Fatalf("托盘快捷键未同步：%q / %q", translate.Accelerator, capture.Accelerator)
+	}
+
+	a.settings.Hotkeys.Screenshot = "Ctrl+Alt+S"
+	a.refreshTrayShortcuts()
+	if capture.Accelerator != "Ctrl+Alt+S" {
+		t.Fatalf("托盘快捷键未更新：%q", capture.Accelerator)
 	}
 }
 

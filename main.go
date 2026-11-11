@@ -117,8 +117,11 @@ func (a *app) setUpTray() {
 	items := []*mygo.MenuItem{
 		{Label: "打开 Toolbox", Click: func(*mygo.MenuItem, *mygo.Window) { a.showMain() }},
 		mygo.Separator(),
-		{Label: "划词翻译", Click: func(*mygo.MenuItem, *mygo.Window) { a.startTranslation() }},
-		{Label: "区域截图", Click: func(*mygo.MenuItem, *mygo.Window) { a.startCapture() }},
+		// Accelerator 由系统菜单绘制在右侧，macOS 自动显示 ⌥、⌘ 等符号。
+		{ID: "tray-translate", Label: "划词翻译", Accelerator: a.settings.Hotkeys.Translate,
+			Click: func(*mygo.MenuItem, *mygo.Window) { a.startTranslation() }},
+		{ID: "tray-capture", Label: "区域截图", Accelerator: a.settings.Hotkeys.Screenshot,
+			Click: func(*mygo.MenuItem, *mygo.Window) { a.startCapture() }},
 		mygo.Separator(),
 	}
 	if a.updatesOn {
@@ -126,6 +129,7 @@ func (a *app) setUpTray() {
 	}
 	items = append(items, &mygo.MenuItem{Role: mygo.RoleQuit})
 	menu := mygo.NewMenu(items)
+	a.trayItems = items
 
 	if runtime.GOOS == "linux" {
 		// AppIndicator 只支持菜单。
@@ -135,8 +139,27 @@ func (a *app) setUpTray() {
 	// 左键切换主窗口，右键弹出菜单（避免主点击被菜单吞掉）。
 	tray.OnClick(a.toggleMain)
 	tray.OnRightClick(func() {
+		a.refreshTrayShortcuts()
 		tray.SetMenu(menu)
 		defer tray.SetMenu(nil)
 		tray.PopUpMenu()
 	})
+}
+
+// refreshTrayShortcuts 把最新快捷键同步到托盘菜单，录制新组合键后立即生效。
+func (a *app) refreshTrayShortcuts() {
+	for _, it := range a.trayItems {
+		var acc string
+		switch it.ID {
+		case "tray-translate":
+			acc = a.settings.Hotkeys.Translate
+		case "tray-capture":
+			acc = a.settings.Hotkeys.Screenshot
+		default:
+			continue
+		}
+		if it.Accelerator != acc {
+			it.SetAccelerator(acc)
+		}
+	}
 }
