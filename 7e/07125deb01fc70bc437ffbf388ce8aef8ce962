@@ -1,0 +1,19 @@
+CHANGELOG.md
+  s_44acdc2b22904c::t_4501a41cfc4175 5-15,18-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "7e07125deb01fc70bc437ffbf388ce8aef8ce962",
+  "prompts": {},
+  "sessions": {
+    "s_44acdc2b22904c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e1e4af0c-68bd-4f86-9fac-21a256a636d2",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
