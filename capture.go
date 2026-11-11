@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"log"
 	"math"
 	"os"
+	"runtime/debug"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -17,6 +19,7 @@ type captureAction int
 const (
 	actCopy captureAction = iota
 	actSave
+	actPin
 )
 
 // 拖拽状态
@@ -33,6 +36,8 @@ type captureSession struct {
 	app     *app
 	win     *mygo.Window
 	display mygo.Display
+	// area 是覆盖层在屏幕上的位置，贴图时用它把选区换算成全局坐标。
+	area mygo.Rectangle
 
 	bitmap *ui.Bitmap  // 冻结画面（绘制用）
 	srcImg image.Image // 冻结画面（像素采样用）
@@ -43,6 +48,9 @@ type captureSession struct {
 	safeBottom float32
 
 	restoreMain bool // 结束后是否恢复主窗口
+	// restoreInactive 让贴图结束后恢复主窗口时不抢焦点：用户接着要拖贴图
+	// 或回到原应用，不该被工具箱打断。
+	restoreInactive bool
 
 	hasSel bool
 	sel    ui.Rect
@@ -133,6 +141,7 @@ func (a *app) openCaptureOverlay(disp mygo.Display, area mygo.Rectangle, pngData
 	s := &captureSession{
 		app:         a,
 		display:     disp,
+		area:        area,
 		bitmap:      bitmap,
 		srcImg:      img,
 		W:           float32(area.Width),
@@ -183,6 +192,7 @@ func (a *app) openCaptureOverlay(disp mygo.Display, area mygo.Rectangle, pngData
 	// 去掉标题栏样式并提到系统 UI 之上，再按整屏重新摆一次。
 	// 无边框窗口要补回键盘焦点，否则 Esc 收不到。
 	mygo.RunOnMain(func() {
+		defer s.recoverAndClose("初始化")
 		h := s.win.NativeHandle()
 		coverSystemUI(h)
 		s.win.SetBounds(mygo.Rectangle{X: area.X, Y: area.Y, Width: area.Width, Height: area.Height})
@@ -194,17 +204,25 @@ func (a *app) openCaptureOverlay(disp mygo.Display, area mygo.Rectangle, pngData
 // ---------------- 视图 ----------------
 
 func (s *captureSession) view(c *ui.Context) {
+	defer s.recoverAndClose("构建视图")
+	if s.closed {
+		return
+	}
 	// 上一帧的输出请求在这里执行：此时画面已经按“输入框已收起”重绘过，
 	// 再取画面才不会把输入框截进去。没有窗口时没有画面可取，保留请求。
 	if s.pending != nil && s.win != nil {
 		act := *s.pending
 		s.pending = nil
 		s.complete(act)
+		if s.closed {
+			return
+		}
 	}
 
 	// 键盘：ESC 直接退出截图（输入文字时也一样，放弃本次截图）
 	if c.Shortcut(0, ui.KeyEscape) {
 		s.cancel()
+		return
 	}
 	if !s.editingText {
 		if c.Shortcut(0, ui.KeyEnter) {
@@ -230,7 +248,10 @@ func (s *captureSession) view(c *ui.Context) {
 	// 在这里拦截右键，保证任意位置右键都能退出。
 	ui.Themed(c, ui.DarkTheme()).Fill().HandleInput(s.onGlobalInput).Children(func() {
 		ui.Box(c).Fill().HandleInput(s.onInput).Draw(func(p *ui.Painter, r ui.Rect) {
-			s.paint(p)
+			defer s.recoverAndClose("绘制画面")
+			if !s.closed {
+				s.paint(p)
+			}
 		})
 		// 只有首次拉框时收起工具栏；绘制/移动过程中保持显示，
 		// 免得工具栏闪一下又出现（mygo 按下后由被按元素独占 move/up，不会抢事件）。
@@ -391,6 +412,10 @@ func (s *captureSession) bottom() float32 {
 // onGlobalInput 是最外层的输入入口，只用来兜住被工具栏/文字框挡住的右键。
 // 左键一律返回 false，交给下面的背景层和控件正常处理。
 func (s *captureSession) onGlobalInput(ev ui.InputEvent) bool {
+	defer s.recoverAndClose("处理全局输入")
+	if s.closed {
+		return false
+	}
 	if ev.Kind == ui.InputPointerDown && ev.Button != 0 {
 		s.cancel()
 		return true
@@ -399,6 +424,10 @@ func (s *captureSession) onGlobalInput(ev ui.InputEvent) bool {
 }
 
 func (s *captureSession) onInput(ev ui.InputEvent) bool {
+	defer s.recoverAndClose("处理鼠标输入")
+	if s.closed {
+		return false
+	}
 	p := ui.Point{X: ev.X, Y: ev.Y}
 	switch ev.Kind {
 	case ui.InputPointerDown:
@@ -711,7 +740,13 @@ func (s *captureSession) deleteSelected() {
 
 func (s *captureSession) toolbar(c *ui.Context) {
 	sel := normRect(s.sel)
-	const tbH = 46
+	// 颜色选择器独立放第二行，只在当前工具需要选颜色时展示。
+	// 两行各自绘制面板，避免外层边框把颜色选择器和主工具栏包成一体。
+	showColors := toolNeedsColor(s.tool)
+	tbH := float32(44)
+	if showColors {
+		tbH = 82 // 主行 44 + 间距 4 + 颜色行 34
+	}
 	bottom := s.bottom()
 	tby := sel.Y + sel.H + 12 // 先放选区下方
 	if tby+tbH > bottom {     // 下方放不下，放上方
@@ -724,45 +759,78 @@ func (s *captureSession) toolbar(c *ui.Context) {
 		}
 	}
 	tbx := clamp(sel.X, 8, s.W-8)
-	ui.Row(c).Absolute().Left(tbx).Top(tby).
-		Padding(6).Gap(4).Radius(10).Background(ui.RGBA(30, 31, 36, 0.96)).
-		Border(1, ui.RGBA(255, 255, 255, 0.16)).Children(func() {
-		s.toolButton(c, "cursor", "选择", "select")
-		s.toolButton(c, "rect", "矩形", "rect")
-		s.toolButton(c, "ellipse", "椭圆", "ellipse")
-		s.toolButton(c, "line", "直线", "line")
-		s.toolButton(c, "arrowline", "箭头", "arrow")
-		s.toolButton(c, "pen", "画笔", "pen")
-		s.toolButton(c, "text", "文字", "text")
-		s.toolButton(c, "mosaic", "马赛克", "mosaic")
-		divider(c)
-		for _, col := range captureColors {
-			s.colorSwatch(c, col)
-		}
-		divider(c)
-		if iconBtn(c, "undo", "撤销").Clicked() {
-			s.flushText()
-			s.undo()
-		}
-		if iconBtn(c, "redo", "重做").Clicked() {
-			s.flushText()
-			s.redo()
-		}
-		if iconBtn(c, "trash", "删除").Clicked() {
-			s.flushText()
-			s.deleteSelected()
-		}
-		divider(c)
-		if s.actionBtn(c, "copy", "复制", true).Clicked() {
-			s.requestComplete(actCopy)
-		}
-		if s.actionBtn(c, "save", "保存", false).Clicked() {
-			s.requestComplete(actSave)
-		}
-		if iconBtn(c, "close", "取消").Clicked() {
-			s.cancel()
+	ui.Column(c).Absolute().Left(tbx).Top(tby).Gap(4).AlignItems(ui.Start).Children(func() {
+		ui.Row(c).Gap(4).Padding(6).Radius(10).Background(ui.RGBA(30, 31, 36, 0.96)).
+			Border(1, ui.RGBA(255, 255, 255, 0.16)).Children(func() {
+			s.toolButton(c, "cursor", "选择", "select")
+			s.toolButton(c, "rect", "矩形", "rect")
+			s.toolButton(c, "ellipse", "椭圆", "ellipse")
+			s.toolButton(c, "line", "直线", "line")
+			s.toolButton(c, "arrowline", "箭头", "arrow")
+			s.toolButton(c, "pen", "画笔", "pen")
+			s.toolButton(c, "text", "文字", "text")
+			s.toolButton(c, "mosaic", "马赛克", "mosaic")
+			divider(c)
+			if iconBtn(c, "undo", "撤销").Clicked() {
+				s.flushText()
+				s.undo()
+			}
+			if iconBtn(c, "redo", "重做").Clicked() {
+				s.flushText()
+				s.redo()
+			}
+			if iconBtn(c, "trash", "删除").Clicked() {
+				s.flushText()
+				s.deleteSelected()
+			}
+			divider(c)
+			if s.actionBtn(c, "copy", "复制", true).Clicked() {
+				s.requestComplete(actCopy)
+			}
+			if s.actionBtn(c, "pin", "贴图", false).Clicked() {
+				s.requestComplete(actPin)
+			}
+			if s.actionBtn(c, "save", "保存", false).Clicked() {
+				s.requestComplete(actSave)
+			}
+			if iconBtn(c, "close", "取消").Clicked() {
+				s.cancel()
+			}
+		})
+		if showColors {
+			ui.Row(c).Gap(4).Padding(6).Radius(10).Background(ui.RGBA(30, 31, 36, 0.96)).
+				Border(1, ui.RGBA(255, 255, 255, 0.16)).Children(func() {
+				for _, col := range captureColors {
+					s.colorSwatch(c, col)
+				}
+				if toolNeedsStroke(s.tool) {
+					divider(c)
+					for _, opt := range captureStrokeOptions {
+						s.strokeWidthButton(c, opt.width, opt.label)
+					}
+				}
+			})
 		}
 	})
+}
+
+// toolNeedsColor 判断工具是否需要颜色（马赛克不依赖颜色，选择工具不产生标注）。
+func toolNeedsColor(tool string) bool {
+	switch tool {
+	case "rect", "ellipse", "line", "arrow", "pen", "text":
+		return true
+	}
+	return false
+}
+
+// 文字虽然复用 strokeWidth 计算字号，但第二行只给真正的线条工具显示粗细，
+// 避免“线宽”在文字工具下产生歧义。
+func toolNeedsStroke(tool string) bool {
+	switch tool {
+	case "rect", "ellipse", "line", "arrow", "pen":
+		return true
+	}
+	return false
 }
 
 var captureColors = []ui.Color{
@@ -772,6 +840,15 @@ var captureColors = []ui.Color{
 	ui.RGBA(59, 130, 246, 1),
 	ui.RGBA(255, 255, 255, 1),
 	ui.RGBA(0, 0, 0, 1),
+}
+
+var captureStrokeOptions = []struct {
+	width float32
+	label string
+}{
+	{width: 2, label: "细线"},
+	{width: 3, label: "中线"},
+	{width: 5, label: "粗线"},
 }
 
 func (s *captureSession) toolButton(c *ui.Context, iconName, label, tool string) {
@@ -825,6 +902,22 @@ func (s *captureSession) colorSwatch(c *ui.Context, col ui.Color) {
 	}
 	if b.Clicked() {
 		s.color = col
+	}
+}
+
+func (s *captureSession) strokeWidthButton(c *ui.Context, width float32, label string) {
+	active := s.strokeWidth == width
+	b := ui.Button(c, "").Label(label).Size(26, 20).Radius(5).Padding(0).Center()
+	fg := ui.RGBA(180, 180, 185, 1)
+	if active {
+		b.Background(colAccentSoft)
+		fg = colAccentStr
+	}
+	b.Children(func() {
+		ui.Box(c).Width(16).Height(width).Radius(width / 2).Background(fg)
+	})
+	if b.Clicked() {
+		s.strokeWidth = width
 	}
 }
 
@@ -883,14 +976,18 @@ func (s *captureSession) complete(action captureAction) {
 	}
 
 	out := buf.Bytes()
-	if action == actCopy {
+	switch action {
+	case actCopy:
 		if err := mygo.Clipboard.WriteImage(out); err != nil {
 			s.app.toast("复制失败：" + err.Error())
 			return
 		}
 		s.app.toast("已复制到剪贴板")
-	} else {
+	case actSave:
 		path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
+			// 绑定当前屏幕的截图覆盖层；未指定父窗口时，macOS 可能把保存面板
+			// 按主窗口或历史位置放到另一块屏幕。
+			Parent:      s.win,
 			Title:       "保存截图",
 			DefaultPath: "Screenshot.png",
 			Filters:     []mygo.FileFilter{{Name: "PNG 图片", Extensions: []string{"png"}}},
@@ -904,12 +1001,31 @@ func (s *captureSession) complete(action captureAction) {
 			return
 		}
 		s.app.toast("已保存到 " + path)
+	case actPin:
+		x, y, w, h := pinBounds(s.area, sel)
+		if s.app.pinImage(out, x, y, w, h) == nil {
+			// 贴图失败时保留覆盖层，和保存失败一样，用户还能重试。
+			return
+		}
+		s.restoreInactive = true
 	}
 	s.close()
 }
 
 func (s *captureSession) cancel() {
 	s.close()
+}
+
+// recoverAndClose 兜底截图窗口内的意外 panic：截图蒙层置顶且覆盖整块屏幕，
+// 不能为了保留现场而把用户锁在里面。堆栈写入日志，窗口和会话立即清理。
+func (s *captureSession) recoverAndClose(stage string) {
+	if r := recover(); r != nil {
+		log.Printf("截图蒙层%s发生异常：%v\n%s", stage, r, debug.Stack())
+		s.close()
+		if s.app != nil {
+			s.app.toast("截图工具发生异常，已关闭蒙层；详情见日志")
+		}
+	}
 }
 
 func (s *captureSession) close() {
@@ -922,6 +1038,10 @@ func (s *captureSession) close() {
 	}
 	s.app.capture = nil
 	if s.restoreMain && s.app.win != nil {
-		s.app.win.Show()
+		if s.restoreInactive {
+			s.app.win.ShowInactive()
+		} else {
+			s.app.win.Show()
+		}
 	}
 }

@@ -271,6 +271,25 @@ func TestEscapeWhileEditingExitsCapture(t *testing.T) {
 	}
 }
 
+// 输入处理出现意外 panic 时必须释放置顶蒙层，不能把它留在异常状态。
+func TestInputPanicClosesCapture(t *testing.T) {
+	s := newTestSession()
+	s.app.capture = s
+	s.marks = []mark{{kind: mkRect}}
+	s.selected = 0
+	s.drag = dsMoveMark
+	// 故意留空移动前快照，模拟未预料的索引异常。
+	s.pre = nil
+
+	s.onInput(ui.InputEvent{Kind: ui.InputPointerMove, X: 20, Y: 20})
+	if !s.closed {
+		t.Fatal("输入处理 panic 后蒙层没有关闭")
+	}
+	if s.app.capture != nil {
+		t.Fatal("输入处理 panic 后截图会话没有清理")
+	}
+}
+
 // 背景上右键退出截图。
 func TestRightClickExitsCapture(t *testing.T) {
 	s := newTestSession()
@@ -310,6 +329,27 @@ func TestToolbarClickStillWorks(t *testing.T) {
 	}
 	if s.tool != "rect" {
 		t.Fatalf("点击工具栏没有切换工具：%s", s.tool)
+	}
+}
+
+func TestToolbarStrokeWidth(t *testing.T) {
+	s := newTestSession()
+	tt := ui.NewTester(s.view, 400, 300)
+	dragSel(tt, 40, 40, 260, 200)
+
+	if err := tt.Click("矩形"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("粗线"); err != nil {
+		t.Fatal(err)
+	}
+	if s.strokeWidth != 5 {
+		t.Fatalf("点击粗线后线宽应为 5，实际 %v", s.strokeWidth)
+	}
+
+	dragDraw(tt, 60, 60, 120, 100)
+	if len(s.marks) != 1 || s.marks[0].width != 5 {
+		t.Fatalf("新标注没有使用所选线宽：%+v", s.marks)
 	}
 }
 

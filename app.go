@@ -48,6 +48,8 @@ type app struct {
 	registered map[string]string
 
 	capture *captureSession
+	// pins 是当前贴在桌面上的截图，每张一个独立窗口。
+	pins []*pinWindow
 	// trans 是复用的划词翻译浮窗，首次划词时创建。
 	trans *translationSession
 }
