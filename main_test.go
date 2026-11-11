@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -35,11 +36,60 @@ func TestNavigation(t *testing.T) {
 	if !tt.HasText("开机自动启动") {
 		t.Errorf("设置页应显示“开机自动启动”，实际文本：%q", tt.Texts())
 	}
+	if tt.HasText("保存设置") {
+		t.Error("设置页不应再显示“保存设置”按钮")
+	}
 	if err := tt.Click("概览"); err != nil {
 		t.Fatalf("点击“概览”导航失败：%v", err)
 	}
 	if !tt.HasText("插件概览") {
 		t.Errorf("应回到概览页，实际文本：%q", tt.Texts())
+	}
+}
+
+func TestManualSaveButtonsRemoved(t *testing.T) {
+	a := newTestApp()
+	tt := ui.NewTester(a.view, 980, 680)
+
+	if err := tt.Click("翻译"); err != nil {
+		t.Fatal(err)
+	}
+	if tt.HasText("保存翻译设置") {
+		t.Error("翻译页不应再显示“保存翻译设置”按钮")
+	}
+	if err := tt.Click("截图"); err != nil {
+		t.Fatal(err)
+	}
+	if tt.HasText("保存截图设置") {
+		t.Error("截图页不应再显示“保存截图设置”按钮")
+	}
+}
+
+func TestLanguageSelectionPersists(t *testing.T) {
+	a := newTestApp()
+	a.configPath = filepath.Join(t.TempDir(), "config.json")
+	tt := ui.NewTester(a.view, 980, 680)
+
+	if err := tt.Click("翻译"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("自动判断"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("英语"); err != nil {
+		t.Fatalf("%v；当前文本：%q", err, tt.Texts())
+	}
+	if a.settings.TargetLang != "en" {
+		t.Fatalf("目标语言没有切换为英语：%q", a.settings.TargetLang)
+	}
+
+	cfg, err := loadConfig(a.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Settings.TargetLang != "en" {
+		t.Fatalf("目标语言没有自动保存：%q", cfg.Settings.TargetLang)
 	}
 }
 
@@ -59,6 +109,19 @@ func TestProviderModal(t *testing.T) {
 	}
 	if !tt.HasText("App ID") {
 		t.Errorf("百度 Provider 弹窗应显示 App ID 字段，实际文本：%q", tt.Texts())
+	}
+	if !tt.HasText("打开百度翻译接入指南") {
+		t.Errorf("百度 Provider 弹窗应显示申请指引：%q", tt.Texts())
+	}
+
+	if err := tt.Click("关闭"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("Google 翻译配置"); err != nil {
+		t.Fatal(err)
+	}
+	if !tt.HasText("需要：Google Cloud API Key") || !tt.HasText("打开 Google Cloud 凭据页") {
+		t.Errorf("Google Provider 弹窗应显示 API Key 申请指引：%q", tt.Texts())
 	}
 }
 

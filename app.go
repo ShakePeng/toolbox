@@ -32,8 +32,6 @@ type app struct {
 	draft     *providerDraft
 	recording string
 
-	settingsSaving bool
-
 	// updatesOn 表示更新插件已装配（main 里 mygo.Use 之后才为 true）。
 	// 单元测试不跑 main，靠它跳过更新相关的调用。
 	updatesOn bool
@@ -372,8 +370,6 @@ func (a *app) translationSection(c *ui.Context) {
 		})
 	}
 
-	a.saveBar(c, "保存翻译设置")
-
 	a.providerGrid(c)
 }
 
@@ -447,11 +443,7 @@ func (a *app) providerCard(c *ui.Context, i int) ui.Element {
 // ---------------- 截图 ----------------
 
 func (a *app) screenshotSection(c *ui.Context) {
-	a.intro(c, "SCREENSHOT", "截图标注", "冻结当前屏幕，完成框选、标注、复制和保存。", func() {
-		if primaryBtn(c, "保存截图设置").Clicked() {
-			a.saveSettingsUI()
-		}
-	})
+	a.intro(c, "SCREENSHOT", "截图标注", "冻结当前屏幕，完成框选、标注、复制和保存。", nil)
 
 	// Windows 的屏幕捕获不需要授权。
 	if runtime.GOOS == "darwin" {
@@ -501,8 +493,6 @@ func (a *app) settingsSection(c *ui.Context) {
 			}
 		})
 	})
-
-	a.saveBar(c, "保存设置")
 
 	// 更新 hero
 	ui.Row(c).Gap(20).AlignItems(ui.Center).Padding(24).Radius(19).Background(colCard).
@@ -664,15 +654,11 @@ func (a *app) langSelect(c *ui.Context) {
 	})
 	if a.settings.TargetLang != langCode(a.langSel) {
 		a.settings.TargetLang = langCode(a.langSel)
-	}
-}
-
-func (a *app) saveBar(c *ui.Context, label string) {
-	ui.Row(c).Justify(ui.End).Children(func() {
-		if primaryBtn(c, label).Clicked() {
-			a.saveSettingsUI()
+		// 页面不再提供手动保存按钮，语言切换后立即落盘。
+		if err := a.persist(); err != nil {
+			a.toast("保存失败：" + err.Error())
 		}
-	})
+	}
 }
 
 // iconTile 画一个带圆角底色的图标块。
@@ -767,18 +753,6 @@ func (a *app) afterProviderChange() {
 	}
 }
 
-func (a *app) saveSettingsUI() {
-	a.settingsSaving = true
-	err := a.persist()
-	a.settingsSaving = false
-	if err != nil {
-		a.toast("保存失败：" + err.Error())
-		return
-	}
-	a.registerHotkeys()
-	a.toast("设置已保存")
-}
-
 // checkUpdate 打开更新窗口。真正的检查、下载、签名校验与替换都由
 // mygo 的更新插件完成（updater/native），这里只负责发起。
 func (a *app) checkUpdate() {
@@ -826,7 +800,7 @@ func (a *app) openLog() {
 }
 
 func (a *app) registerHotkeys() {
-	// 录制期间快捷键是刻意注销的；保存设置等路径也会走到这里，
+	// 录制期间快捷键是刻意注销的；功能开关等路径也会走到这里，
 	// 不能把刚注销的组合键又注册回去。
 	if a.recording != "" {
 		return

@@ -135,6 +135,9 @@ func (a *app) providerModal(c *ui.Context) {
 				}
 			})
 
+			// 申请指引放在字段附近，用户不用离开配置流程去猜所需凭证。
+			a.providerCredentialGuide(c, d.Kind)
+
 			// 走系统代理
 			ui.Row(c).AlignItems(ui.Center).Gap(18).Padding(13, 14).Radius(11).
 				Background(ui.RGBA(255, 255, 255, 0.035)).Border(1, colLine).Children(func() {
@@ -178,5 +181,31 @@ func (a *app) modalField(c *ui.Context, label string, val *string, placeholder s
 	ui.Column(c).Gap(8).Children(func() {
 		ui.Text(c, label).FontSize(11).TextColor(colTextSoft)
 		ui.TextInput(c, val).Placeholder(placeholder).Label(label).Height(40).WidthPercent(100)
+	})
+}
+
+// providerCredentialGuide 给出各服务实际使用的凭证类型与官方申请入口。
+// Google 用的是 Translation Basic 的 API Key，不引导用户创建服务账号 JSON。
+func (a *app) providerCredentialGuide(c *ui.Context, kind string) {
+	var title, steps, linkLabel, url string
+	switch kind {
+	case "baidu":
+		title = "需要：APP ID 和密钥"
+		steps = "登录百度翻译开放平台，注册开发者并开通通用文本翻译；在管理控制台创建应用后，将 APP ID 和密钥填入上方。"
+		linkLabel = "打开百度翻译接入指南"
+		url = "https://fanyi-api.baidu.com/doc/23"
+	case "google":
+		title = "需要：Google Cloud API Key"
+		steps = "在 Google Cloud 创建项目、启用结算和 Cloud Translation API；进入“凭据”页创建 API Key，建议仅允许 Cloud Translation API。"
+		linkLabel = "打开 Google Cloud 凭据页"
+		url = "https://console.cloud.google.com/apis/credentials"
+	default:
+		return
+	}
+	ui.Column(c).Gap(6).Padding(12, 14).Radius(10).
+		Background(ui.RGBA(255, 255, 255, 0.035)).Border(1, colLine).Children(func() {
+		ui.Text(c, title).FontSize(12).Bold().TextColor(colTextSoft)
+		ui.Text(c, steps).FontSize(11).TextColor(colTextMuted).LineHeight(1.5)
+		ui.Link(c, linkLabel, url).FontSize(12)
 	})
 }
