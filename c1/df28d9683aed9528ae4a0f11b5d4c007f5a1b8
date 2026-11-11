@@ -1,0 +1,19 @@
+CLAUDE.md
+  s_a7000c5584f5fe::t_56841e1d0efcd0 1-188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "c1df28d9683aed9528ae4a0f11b5d4c007f5a1b8",
+  "prompts": {},
+  "sessions": {
+    "s_a7000c5584f5fe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4fe44bf2-4dc2-408c-8671-6ac45370a63c",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
