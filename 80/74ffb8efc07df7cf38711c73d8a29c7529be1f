@@ -1,0 +1,23 @@
+app.go
+  s_44acdc2b22904c::t_cd709117864675 19-20,821
+main.go
+  s_44acdc2b22904c::t_c80c0f53fad9a6 120-124,132,142,148-165
+main_test.go
+  s_44acdc2b22904c::t_9ebb0718ebd48c 9,97-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "8074ffb8efc07df7cf38711c73d8a29c7529be1f",
+  "prompts": {},
+  "sessions": {
+    "s_44acdc2b22904c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e1e4af0c-68bd-4f86-9fac-21a256a636d2",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
