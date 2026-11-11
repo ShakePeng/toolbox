@@ -1,0 +1,25 @@
+README.md
+  s_190d11fc24d67f::t_1b7e4072df018a 7
+app.go
+  s_190d11fc24d67f::t_c9a3e4387d7c03 51-52
+icons.go
+  s_190d11fc24d67f::t_55a871b2e39b9b 43
+pin_test.go
+  s_190d11fc24d67f::t_155ccb3d67d20c 1-57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "b58402bc40cfc5cf95f36ffd2f0f18e8db093e87",
+  "prompts": {},
+  "sessions": {
+    "s_190d11fc24d67f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0e50b5bb-7c2c-4f0d-ae20-2d22bd93b331",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
