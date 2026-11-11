@@ -314,10 +314,9 @@ func (s *translationSession) fitHeight() {
 	if s.win == nil {
 		return
 	}
-	// 逐项累加实际占位：窗口上下边框 2、头部 56、头尾两条分隔线 2、底部 40。
-	// 头部 MinHeight 是 52，但两行文字会把实际高度撑到约 56；旧公式按 52 估算，
-	// 少算的几像素让 body 溢出，Scroll 会裁掉 results 底部的 10px 内边距。
-	h := 2 + 56 + 1 + 1 + 40
+	// 逐项累加实际占位：窗口上下边框 2、头部约 53（两行文字 + 底部分隔线）、底部 40。
+	// 多留 1px 给不同平台的字体行高，避免 body 溢出后 Scroll 裁掉 results 底部内边距。
+	h := 2 + 54 + 40
 	if s.editing {
 		h += 10 + 136 // 原文编辑卡：上外边距 + 卡片
 	} else if s.source != "" {
@@ -344,8 +343,8 @@ func resultCardHeight(r translationResult) int {
 	if r.Loading || r.Err != "" || r.Text == "" {
 		return 88
 	}
-	// 70 = 上下 padding + 服务标题行 + 译文上边距；每行译文约 24。
-	return 70 + estimateLines(r.Text)*24
+	// 66 = 上下 padding + 服务标题行 + 译文上边距；实测单行卡片约 90。
+	return 66 + estimateLines(r.Text)*24
 }
 
 // estimateLines 粗略按“中文 2 个宽度单位、其他 1 个”估算换行后的行数。
