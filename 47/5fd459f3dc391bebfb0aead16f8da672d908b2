@@ -1,0 +1,21 @@
+CHANGELOG.md
+  s_5a84c6b4a0ff2c::t_4d8de890867cd2 3,12,27
+mygo.json
+  s_5a84c6b4a0ff2c::t_57d1adf21983de 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "475fd459f3dc391bebfb0aead16f8da672d908b2",
+  "prompts": {},
+  "sessions": {
+    "s_5a84c6b4a0ff2c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b7de494-ab59-42b0-8c12-1f8480c4b35c",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
