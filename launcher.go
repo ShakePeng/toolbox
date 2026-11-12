@@ -5,6 +5,7 @@ import (
 	"log"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -19,7 +20,7 @@ const (
 	// 原生 UI 没有内容自适应高度，这里按各区域的实际占位累加。
 	launcherHeaderHeight = 67
 	launcherFooterHeight = 37
-	launcherRowHeight    = 52
+	launcherRowHeight    = 48
 	launcherListPadding  = 16
 	launcherEmptyHeight  = 92
 	launcherNoticeHeight = 48
@@ -231,20 +232,9 @@ func (s *launcherSession) rebuildResults() {
 	if s.app == nil {
 		return
 	}
-	// 输入“命令 + 空格”时切到项目模式：只列配置文件夹的下一级项目。
+	// 输入“命令 + 空格”时切到项目模式：命令部分允许只输入触发词的前缀。
 	if src, query, ok := s.projectQuery(); ok {
-		s.ensureProjects(src)
-		if src.id == "fork" {
-			s.app.ensureForkProbe()
-		} else {
-			s.app.ensureVSCodeProbe()
-		}
-		s.results = filterLauncherProjects(query, s.projects, launcherMaxResults)
-		s.selected = clampLauncherSelection(s.selected, len(s.results), 0)
-		s.fitHeight()
-		if s.win != nil && s.win.IsVisible() {
-			s.refresh()
-		}
+		s.showProjects(src, query)
 		return
 	}
 	src := launcherSources{
@@ -258,12 +248,73 @@ func (s *launcherSession) rebuildResults() {
 		src.files = s.files.entries
 	}
 	s.results = launcherFilter(s.query, src, launcherMaxResults)
+	// 模糊命中的内置命令和项目触发词排在搜索结果最前面。
+	if actions := s.launcherActions(); len(actions) > 0 {
+		s.results = append(actions, s.results...)
+		if len(s.results) > launcherMaxResults {
+			s.results = s.results[:launcherMaxResults]
+		}
+	}
 	s.selected = clampLauncherSelection(s.selected, len(s.results), 0)
 	s.prefetchIcons(s.results)
 	s.fitHeight()
 	if s.win != nil && s.win.IsVisible() {
 		s.refresh()
 	}
+}
+
+// showProjects 渲染某个项目源的项目列表。
+func (s *launcherSession) showProjects(src launcherProjectSource, query string) {
+	s.projectSource = src.id
+	s.ensureProjects(src)
+	if src.id == "fork" {
+		s.app.ensureForkProbe()
+	} else {
+		s.app.ensureVSCodeProbe()
+	}
+	s.results = filterLauncherProjects(query, s.projects, launcherMaxResults)
+	s.selected = clampLauncherSelection(s.selected, len(s.results), 0)
+	s.fitHeight()
+	if s.win != nil && s.win.IsVisible() {
+		s.refresh()
+	}
+}
+
+// launcherActions 返回输入模糊命中内置命令或项目触发词时的操作行。
+func (s *launcherSession) launcherActions() []launcherItem {
+	q := strings.TrimSpace(s.query)
+	if utf8.RuneCountInString(q) < 2 {
+		return nil
+	}
+	var items []launcherItem
+	if builtinCommandMatches(q) {
+		items = append(items, launcherItem{
+			kind:     launcherKindAction,
+			action:   launcherActionReindex,
+			title:    "重建索引",
+			subtitle: "重新枚举已安装应用并重建文件索引",
+			path:     "launcher-action-reindex",
+		})
+	}
+	// 已经输入空格时由 projectQuery 负责项目模式，这里只提示触发词本身。
+	if strings.ContainsAny(s.query, " \t") {
+		return items
+	}
+	for _, src := range s.app.projectSources() {
+		prefix := strings.TrimSpace(src.prefix)
+		if prefix == "" || !strings.HasPrefix(strings.ToLower(prefix), strings.ToLower(q)) {
+			continue
+		}
+		items = append(items, launcherItem{
+			kind:     launcherKindAction,
+			action:   launcherActionProject,
+			project:  src.id,
+			title:    "搜索 " + src.label + " 项目",
+			subtitle: "当前触发词 " + prefix + "，回车进入项目模式",
+			path:     "launcher-action-project-" + src.id,
+		})
+	}
+	return items
 }
 
 // desiredHeight 让浮窗跟着结果数量伸缩：空查询只剩搜索框，一两条结果就
@@ -344,6 +395,25 @@ func (s *launcherSession) activate(i int) {
 		return
 	}
 	item := s.results[i]
+	if item.kind == launcherKindAction {
+		switch item.action {
+		case launcherActionReindex:
+			s.runReindexCommand()
+		case launcherActionProject:
+			// 补全成完整触发词 + 空格。直接改绑定值时光标会停在输入长度处，
+			// 所以递增 inputSeq 重建输入框，让光标落在补全后的末尾。
+			prefix := s.app.projectPrefix(item.project)
+			if prefix == "" {
+				return
+			}
+			s.query = prefix + " "
+			s.inputSeq++
+			s.selected = 0
+			s.notice = ""
+			s.rebuildResults()
+		}
+		return
+	}
 	var err error
 	switch item.kind {
 	case launcherKindApp:
@@ -528,6 +598,18 @@ func (s *launcherSession) resultRow(c *ui.Context, i int) {
 }
 
 func (s *launcherSession) itemIcon(c *ui.Context, item launcherItem) {
+	if item.kind == launcherKindAction {
+		if item.action == launcherActionProject {
+			if toolIcon := launcherToolIcons[item.project]; toolIcon != nil {
+				ui.Image(c, toolIcon).Size(28, 28)
+				return
+			}
+			iconTile(c, "code", 28, 8, colAccentSoft, colAccentStr)
+			return
+		}
+		iconTile(c, "refresh", 28, 8, colBgSoft, colTextSoft)
+		return
+	}
 	if item.kind == launcherKindProject {
 		if toolIcon := launcherToolIcons[s.projectSource]; toolIcon != nil {
 			ui.Image(c, toolIcon).Size(28, 28)
@@ -557,6 +639,8 @@ func (s *launcherSession) footer(c *ui.Context) {
 		hint := "↑↓ 选择 · ↵ 打开 · Esc 关闭"
 		if src, _, ok := s.projectQuery(); ok {
 			hint = "↑↓ 选择 · ↵ 用 " + src.label + " 打开 · Esc 关闭"
+		} else if s.selected < len(s.results) && s.results[s.selected].kind == launcherKindAction {
+			hint = "↵ 执行 · Esc 关闭"
 		}
 		ui.Text(c, hint).FontSize(11).TextColor(colTextMuted).MaxLines(1)
 		ui.Spacer(c)
@@ -653,14 +737,6 @@ func (a *app) launcherSection(c *ui.Context) {
 					ui.Text(c, "文件索引在首次唤起时建立，覆盖常用目录，不做全盘搜索。").
 						FontSize(12).TextColor(colTextSoft)
 					ui.Text(c, a.launcherFileStatus()).FontSize(11).TextColor(colTextMuted).MaxLines(2)
-					if secondaryBtn(c, "重建文件索引").Clicked() {
-						if a.launcher == nil {
-							a.toast("首次唤起时会自动建立索引")
-							return
-						}
-						a.launcher.rebuildCaches()
-						a.toast("正在重建索引…")
-					}
 				})
 			})
 			a.launcherSourceItem(c, "vscode", "VS Code 快速打开", "输入触发词 + 空格，快速打开项目", &a.settings.LauncherVSCodeEnabled, func() {
@@ -686,6 +762,31 @@ func (a *app) launcherSection(c *ui.Context) {
 					FontSize(12).TextColor(colTextMuted)
 			})
 		})
+	})
+
+	a.settingsSection2(c, "code", "内置命令", "在快速启动浮窗中输入后回车执行，命令固定，不可修改。", func() {
+		ui.Column(c).Gap(8).Children(func() {
+			builtinCommandRow(c, []string{reindexCommand, "重建索引"}, "重建应用与文件索引，两种写法等效")
+		})
+	})
+}
+
+// builtinCommandRow 展示一条只读的启动器命令。commands 是同一命令的多种
+// 写法（如英文名和中文名），并排展示让用户一眼看出都能用；命令本身不可编辑。
+func builtinCommandRow(c *ui.Context, commands []string, desc string) {
+	ui.Row(c).Padding(11, 12).Gap(12).AlignItems(ui.Center).
+		Radius(10).Background(colBg).Border(1, colLine).Children(func() {
+		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+			for i, command := range commands {
+				if i > 0 {
+					ui.Text(c, "或").FontSize(11).TextColor(colTextMuted)
+				}
+				ui.Row(c).Padding(4, 9).Radius(7).Background(colBgSoft).Border(1, colLine).Children(func() {
+					ui.Text(c, command).Font("SF Mono, Menlo, monospace").FontSize(12).TextColor(colTextSoft)
+				})
+			}
+		})
+		ui.Text(c, desc).FontSize(12).TextColor(colTextMuted).Grow(1)
 	})
 }
 
@@ -824,6 +925,15 @@ func (a *app) projectCommandRow(c *ui.Context, t projectTool) {
 		in := ui.TextInput(c.Key(t.id+"-command"), t.command).
 			Placeholder(t.placeholder).Label(t.label + " 触发词").Height(40).WidthPercent(100)
 		if in.Changed() {
+			// 内置命令在浮窗里优先匹配，触发词占用同名后「命令 + 空格」
+			// 永远进不了项目模式，所以这里拒绝保存并回退到默认触发词。
+			if isBuiltinCommand(*t.command) {
+				bad := strings.TrimSpace(*t.command)
+				*t.command = ""
+				t.onCommand()
+				a.toast("“" + bad + "”是内置命令，不能作为触发词")
+				return
+			}
 			t.onCommand()
 		}
 	})

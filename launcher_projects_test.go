@@ -27,6 +27,10 @@ func TestProjectQuery(t *testing.T) {
 		{"code", "code\talpha", "alpha", true},
 		{"code", "code", "", false},
 		{"code", "codefoo", "", false},
+		// 命令部分允许只输入触发词前缀，单个字符不算。
+		{"code", "co alpha", "alpha", true},
+		{"code", "cod\talpha", "alpha", true},
+		{"code", "c alpha", "", false},
 		{"cursor", "cursor app", "app", true},
 		{"cursor", "code app", "", false},
 	}

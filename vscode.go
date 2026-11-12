@@ -32,8 +32,10 @@ func (a *app) vscodeCommand() string {
 	if a == nil {
 		return "code"
 	}
+	// 配置被手工改成内置命令时退回默认值，否则「命令 + 空格」永远进不了
+	// 项目模式。
 	cmd := strings.TrimSpace(a.settings.LauncherVSCodeCommand)
-	if cmd == "" {
+	if cmd == "" || isBuiltinCommand(cmd) {
 		return "code"
 	}
 	return cmd

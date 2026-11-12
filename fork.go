@@ -33,8 +33,10 @@ func (a *app) forkCommand() string {
 	if a == nil {
 		return "fork"
 	}
+	// 配置被手工改成内置命令时退回默认值，否则「命令 + 空格」永远进不了
+	// 项目模式。
 	cmd := strings.TrimSpace(a.settings.LauncherForkCommand)
-	if cmd == "" {
+	if cmd == "" || isBuiltinCommand(cmd) {
 		return "fork"
 	}
 	return cmd

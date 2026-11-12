@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 const launcherMaxProjects = 2000
@@ -58,22 +59,45 @@ func (s *launcherSession) projectQuery() (launcherProjectSource, string, bool) {
 		return launcherProjectSource{}, "", false
 	}
 	raw := strings.TrimLeft(s.query, " \t")
+	sep := strings.IndexAny(raw, " \t")
+	if sep <= 0 {
+		s.projectSource = ""
+		return launcherProjectSource{}, "", false
+	}
+	command := raw[:sep]
+	// 单个字母的前缀太容易和普通多词搜索混淆，至少两个字符才认作命令。
+	if utf8.RuneCountInString(command) < 2 {
+		s.projectSource = ""
+		return launcherProjectSource{}, "", false
+	}
+	query := strings.TrimSpace(raw[sep+1:])
 	for _, src := range s.app.projectSources() {
 		prefix := strings.TrimSpace(src.prefix)
-		if prefix == "" || len(raw) <= len(prefix) {
+		if prefix == "" {
 			continue
 		}
-		if !strings.EqualFold(raw[:len(prefix)], prefix) {
-			continue
-		}
-		if raw[len(prefix)] != ' ' && raw[len(prefix)] != '\t' {
+		// 命令部分可以只输入触发词的前缀，少打几个字符也能进项目模式。
+		if !strings.HasPrefix(strings.ToLower(prefix), strings.ToLower(command)) {
 			continue
 		}
 		s.projectSource = src.id
-		return src, strings.TrimSpace(raw[len(prefix)+1:]), true
+		return src, query, true
 	}
 	s.projectSource = ""
 	return launcherProjectSource{}, "", false
+}
+
+// projectPrefix 返回某个项目源配置的触发词，找不到时返回空串。
+func (a *app) projectPrefix(id string) string {
+	if a == nil {
+		return ""
+	}
+	for _, src := range a.projectSources() {
+		if src.id == id {
+			return strings.TrimSpace(src.prefix)
+		}
+	}
+	return ""
 }
 
 // currentProjectSource 返回当前项目模式对应的源；不在项目模式时返回 nil。

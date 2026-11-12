@@ -16,6 +16,18 @@ const (
 	launcherKindFile
 	launcherKindDir
 	launcherKindProject
+	// launcherKindAction 是命令触发的操作行（如重建索引），不对应文件或应用。
+	launcherKindAction
+)
+
+// launcherAction 是操作行要执行的动作。
+type launcherAction uint8
+
+const (
+	launcherActionNone launcherAction = iota
+	launcherActionReindex
+	// launcherActionProject 进入某个项目源的项目模式。
+	launcherActionProject
 )
 
 // launcherItem 是浮窗列表里的一行。
@@ -26,6 +38,9 @@ type launcherItem struct {
 	path     string
 	app      mygo.InstalledApp
 	score    int
+	action   launcherAction
+	// project 是项目提示行对应的源 id（vscode / fork）。
+	project string
 }
 
 func (k launcherKind) label() string {
@@ -36,6 +51,8 @@ func (k launcherKind) label() string {
 		return "文件夹"
 	case launcherKindProject:
 		return "项目"
+	case launcherKindAction:
+		return "操作"
 	default:
 		return "文件"
 	}

@@ -4,6 +4,7 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -216,6 +217,39 @@ func (s *launcherSession) appIcon(path string) *ui.Bitmap {
 		return ic.bmp
 	}
 	return nil
+}
+
+// reindexCommand 是启动器里的手动重建命令。应用和文件索引是会话级缓存，
+// 刚安装的应用不会自动出现；这个命令用来在不重启工具箱的情况下刷新。
+const reindexCommand = "reindex"
+
+// builtinCommandMatches 判断输入是否模糊命中内置命令，支持中英文子串。
+// 至少两个字符才提示，避免单个字母把操作行推到正常结果前面。
+func builtinCommandMatches(query string) bool {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if utf8.RuneCountInString(q) < 2 {
+		return false
+	}
+	return strings.Contains(reindexCommand, q) || strings.Contains("重建索引", q)
+}
+
+// isBuiltinCommand 判断一段输入是否命中启动器的内置命令。内置命令在浮窗里
+// 优先于项目模式匹配，因此也不能被配置成 VS Code / Fork 的触发词。
+func isBuiltinCommand(command string) bool {
+	q := strings.TrimSpace(command)
+	return q != "" && (strings.EqualFold(q, reindexCommand) || q == "重建索引")
+}
+
+// runReindexCommand 执行浮窗里的重建命令：先清空查询回到搜索框，重建在
+// 后台继续，完成后用户可以直接输入关键字搜索新装的应用。
+func (s *launcherSession) runReindexCommand() {
+	if s == nil {
+		return
+	}
+	s.query = ""
+	s.selected = 0
+	s.notice = ""
+	s.rebuildCaches()
 }
 
 // rebuildCaches 丢弃应用/文件/图标缓存并重新加载。旧的 goroutine 结果

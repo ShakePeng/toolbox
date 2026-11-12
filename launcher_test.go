@@ -60,6 +60,63 @@ func TestLauncherViewRender(t *testing.T) {
 	}
 }
 
+// 内置命令不能同时用作项目触发词，否则「命令 + 空格」会被内置命令截走。
+func TestBuiltinCommandConflict(t *testing.T) {
+	for _, tc := range []struct {
+		cmd  string
+		want bool
+	}{
+		{"reindex", true},
+		{"REINDEX", true},
+		{" 重建索引 ", true},
+		{"reindex2", false},
+		{"重建索引列表", false},
+		{"", false},
+	} {
+		if got := isBuiltinCommand(tc.cmd); got != tc.want {
+			t.Errorf("isBuiltinCommand(%q) = %v, want %v", tc.cmd, got, tc.want)
+		}
+	}
+
+	// 配置被手工改成内置命令时，触发词退回默认值。
+	a := newTestApp()
+	a.settings.LauncherVSCodeCommand = "reindex"
+	a.settings.LauncherForkCommand = "重建索引"
+	if got := a.vscodeCommand(); got != defaultVSCodeCommand {
+		t.Errorf("VS Code 触发词冲突时应退回 %q，实际 %q", defaultVSCodeCommand, got)
+	}
+	if got := a.forkCommand(); got != defaultForkCommand {
+		t.Errorf("Fork 触发词冲突时应退回 %q，实际 %q", defaultForkCommand, got)
+	}
+}
+
+// 启动器里的重建命令应只显示一条操作行，执行后清空查询并回到搜索框。
+func TestLauncherReindexCommand(t *testing.T) {
+	s, _, _ := newTestLauncherSession()
+	for _, q := range []string{"reindex", "REINDEX", "rei", "index", "重建", "索引"} {
+		s.query = q
+		s.rebuildResults()
+		if len(s.results) == 0 || s.results[0].kind != launcherKindAction || s.results[0].action != launcherActionReindex {
+			t.Fatalf("输入 %q 应模糊匹配到重建索引操作，实际 %+v", q, s.results)
+		}
+	}
+
+	s.query = "reindex"
+	s.rebuildResults()
+	tt := ui.NewTester(s.view, launcherWidth, launcherHeight)
+	if !tt.HasText("重建索引") {
+		t.Errorf("浮窗应展示重建索引操作，实际文本：%q", tt.Texts())
+	}
+	if !tt.HasText("↵ 执行 · Esc 关闭") {
+		t.Errorf("底部应显示执行提示，实际文本：%q", tt.Texts())
+	}
+
+	s.activate(0)
+	if s.query != "" {
+		t.Errorf("执行重建后应清空查询，实际 %q", s.query)
+	}
+}
+
 func TestLauncherEmptyQueryOnlyShowsSearch(t *testing.T) {
 	s, _, _ := newTestLauncherSession()
 	tt := ui.NewTester(s.view, launcherWidth, launcherHeaderHeight)
@@ -244,6 +301,55 @@ func TestLauncherProjectMode(t *testing.T) {
 	}
 	if *launched != "/projects/beta" {
 		t.Fatalf("应用 VSCode 打开 /projects/beta，实际 %q", *launched)
+	}
+}
+
+// 输入触发词前缀时先给提示行，回车进入项目模式；之后继续输入仍留在项目模式。
+func TestLauncherProjectPrefixPrompt(t *testing.T) {
+	s, _ := newTestProjectLauncher()
+	s.query = "co"
+	s.rebuildResults()
+	if len(s.results) == 0 || s.results[0].kind != launcherKindAction ||
+		s.results[0].action != launcherActionProject || s.results[0].project != "vscode" {
+		t.Fatalf("输入触发词前缀应显示项目提示行，实际 %+v", s.results)
+	}
+	s.activate(0)
+	if s.query != "code " {
+		t.Fatalf("回车后输入框应补全为完整命令，实际 %q", s.query)
+	}
+	if s.projectSource != "vscode" || len(s.results) != 2 {
+		t.Fatalf("回车后应进入项目模式并列出全部项目，实际 source=%q results=%+v", s.projectSource, s.results)
+	}
+	s.query = "co bet"
+	s.rebuildResults()
+	if len(s.results) != 1 || s.results[0].title != "Beta" {
+		t.Fatalf("触发词前缀 + 查询词应匹配项目，实际 %+v", s.results)
+	}
+}
+
+// 从提示行回车后，输入框应补全成完整触发词，而不是保留输入的前缀。
+func TestLauncherProjectPromptCompletesCommand(t *testing.T) {
+	s, _ := newTestProjectLauncher()
+	tt := ui.NewTester(s.view, launcherWidth, launcherHeight)
+	tt.Frame()
+	tt.Type("cod")
+	tt.Frame()
+	if !tt.HasText("搜索 VS Code 项目") {
+		t.Fatalf("输入前缀应显示项目提示行，实际文本：%q", tt.Texts())
+	}
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if s.query != "code " {
+		t.Fatalf("回车后输入框应补全为完整命令，实际 %q", s.query)
+	}
+	if !tt.HasText("Alpha") || !tt.HasText("Beta") {
+		t.Fatalf("回车后应列出全部项目，实际文本：%q", tt.Texts())
+	}
+	// 补全后光标应在末尾，继续输入直接接在命令后面。
+	tt.Type("x")
+	tt.Frame()
+	if s.query != "code x" {
+		t.Fatalf("补全后继续输入应接在末尾，实际 %q", s.query)
 	}
 }
 
