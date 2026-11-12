@@ -73,19 +73,16 @@ func probeForkCommand(command string) forkProbe {
 }
 
 func forkCLICandidates() []string {
-	switch runtime.GOOS {
-	case "darwin":
-		out := []string{"/usr/local/bin/fork", "/opt/homebrew/bin/fork"}
-		if home, err := os.UserHomeDir(); err == nil {
-			out = append(out, filepath.Join(home, ".local", "bin", "fork"))
-		}
-		return out
-	case "windows":
-		if local := os.Getenv("LOCALAPPDATA"); local != "" {
-			return []string{filepath.Join(local, "Fork", "fork.exe")}
-		}
+	if runtime.GOOS != "darwin" {
+		// Windows 版 Fork 没有独立 CLI，Fork.exe 只能当应用本体由
+		// findForkApp 处理；否则会走 macOS 的 -C 参数，打不开仓库。
+		return nil
 	}
-	return nil
+	out := []string{"/usr/local/bin/fork", "/opt/homebrew/bin/fork"}
+	if home, err := os.UserHomeDir(); err == nil {
+		out = append(out, filepath.Join(home, ".local", "bin", "fork"))
+	}
+	return out
 }
 
 // findForkApp 返回 Fork 应用本体所在路径，找不到时为空。
@@ -98,9 +95,28 @@ func findForkApp() string {
 			candidates = append(candidates, filepath.Join(home, "Applications", "Fork.app"))
 		}
 	case "windows":
-		for _, root := range []string{os.Getenv("LOCALAPPDATA"), os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)")} {
+		// Fork 2.x 改用 Velopack 安装，可执行文件在 current 子目录；
+		// 直接查 Fork\Fork.exe 是早期 Squirrel 布局，保留兼容。
+		local := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
+		if local != "" {
+			candidates = append(candidates,
+				filepath.Join(local, "Fork", "current", "Fork.exe"),
+				filepath.Join(local, "Fork", "Fork.exe"),
+			)
+		}
+		for _, root := range []string{os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)")} {
 			if strings.TrimSpace(root) != "" {
 				candidates = append(candidates, filepath.Join(root, "Fork", "Fork.exe"))
+			}
+		}
+		// 兜底：Velopack 的版本目录名可能变化，扫一层子目录找 Fork.exe。
+		if local != "" {
+			if entries, err := os.ReadDir(filepath.Join(local, "Fork")); err == nil {
+				for _, e := range entries {
+					if e.IsDir() && e.Name() != "packages" {
+						candidates = append(candidates, filepath.Join(local, "Fork", e.Name(), "Fork.exe"))
+					}
+				}
 			}
 		}
 	}
