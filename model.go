@@ -10,7 +10,7 @@ import (
 
 // configSchemaVersion 是落盘配置的版本。迁移必须按版本逐级判断，
 // 不能只看“小于当前版本”，否则升级到 v3 会把 v2 用户的搜索源选择覆盖掉。
-const configSchemaVersion = 6
+const configSchemaVersion = 9
 
 // HotkeySettings 是各插件绑定的全局快捷键（accelerator 字符串）。
 type HotkeySettings struct {
@@ -47,9 +47,12 @@ type Settings struct {
 	// 的搜索地址，可以添加多个；默认关闭。
 	LauncherWebSearchEnabled bool                   `json:"launcherWebSearchEnabled"`
 	LauncherWebSearchEngines []LauncherSearchEngine `json:"launcherWebSearchEngines"`
-	TargetLang               string                 `json:"targetLang"`
-	LaunchAtLogin            bool                   `json:"launchAtLogin"`
-	HasCompletedOnboarding   bool                   `json:"hasCompletedOnboarding"`
+	// AISuppliers 是独立于翻译插件的 AI 供应商配置，目前只做管理。
+	// 每个供应商是 OpenAI 兼容服务，需要 Base URL、API Key 和模型列表。
+	AISuppliers            []AISupplier `json:"aiSuppliers"`
+	TargetLang             string       `json:"targetLang"`
+	LaunchAtLogin          bool         `json:"launchAtLogin"`
+	HasCompletedOnboarding bool         `json:"hasCompletedOnboarding"`
 }
 
 // LauncherSearchEngine 是一个网页搜索源。URL 用 %s 表示查询词占位符。
@@ -58,6 +61,17 @@ type LauncherSearchEngine struct {
 	Name    string `json:"name"`
 	Command string `json:"command"`
 	URL     string `json:"url"`
+}
+
+// AISupplier 是一个 OpenAI 兼容的 AI 供应商。API Key 和翻译凭据一样
+// 目前明文保存在 config.json。
+type AISupplier struct {
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	BaseURL string   `json:"baseUrl"`
+	APIKey  string   `json:"apiKey"`
+	Models  []string `json:"models"`
+	Enabled bool     `json:"enabled"`
 }
 
 // Provider 是一个翻译服务配置，对应原 ProviderConfig / ProviderView。
@@ -73,6 +87,9 @@ type Provider struct {
 	Description    string            `json:"description"`
 	Credentials    map[string]string `json:"credentials"`
 	UseSystemProxy bool              `json:"useSystemProxy"`
+	// SupplierID 是 AI 翻译选择的 AI 供应商，地址和密钥在请求前从
+	// AISuppliers 解析，不再冗余存在 Provider 里。
+	SupplierID string `json:"supplierId"`
 }
 
 // Config 是落盘的完整配置，对应原 AppConfig。
@@ -104,7 +121,7 @@ func defaultSettings() Settings {
 		ScreenshotEnabled:        false,
 		LauncherEnabled:          false,
 		LauncherSearchApps:       true,
-		LauncherSearchFiles:      true,
+		LauncherSearchFiles:      false,
 		LauncherVSCodeEnabled:    false,
 		LauncherVSCodeCommand:    "code",
 		LauncherVSCodeFolders:    nil,
@@ -138,13 +155,10 @@ func defaultProviders() []Provider {
 			Credentials: map[string]string{},
 		},
 		{
-			ID:   "openai",
-			Name: "OpenAI",
-			Kind: "openai-compatible",
-			// 只填 API Key 时直接走官方地址；Base URL 留空会让
-			// “已配置”的服务在每次请求时报“缺少 Base URL”。
-			BaseURL:     defaultOpenAIBaseURL,
-			Description: "接入任意兼容 Chat Completions 的服务。",
+			ID:          "openai",
+			Name:        "AI 翻译",
+			Kind:        "openai-compatible",
+			Description: "选择 AI 供应商中已启用的模型进行翻译。",
 			Credentials: map[string]string{},
 		},
 	}
@@ -173,6 +187,10 @@ func requiredCredentialKeys(kind string) []string {
 
 // providerConfigured 判断凭据是否填写完整，等价于原版 configured 字段。
 func providerConfigured(p Provider) bool {
+	// AI 翻译的地址和密钥来自 AI 供应商，只需要选好供应商和模型。
+	if p.Kind == "openai-compatible" {
+		return strings.TrimSpace(p.SupplierID) != "" && strings.TrimSpace(p.Model) != ""
+	}
 	keys := requiredCredentialKeys(p.Kind)
 	if len(keys) == 0 {
 		return false
@@ -181,10 +199,6 @@ func providerConfigured(p Provider) bool {
 		if p.Credentials[k] == "" {
 			return false
 		}
-	}
-	// OpenAI 兼容服务还需要请求地址，否则“已配置”的卡片会永远翻译失败。
-	if p.Kind == "openai-compatible" && strings.TrimSpace(p.BaseURL) == "" {
-		return false
 	}
 	return true
 }

@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Toolbox 是一个用 Go + [MyGo](https://github.com/egoist/mygo) 构建的原生桌面工具箱（无 webview、无前端框架），发布 macOS（Apple Silicon）与 Windows 两个平台。当前有三个插件：
 
 - **截图标注**：冻结整屏 → 框选 → 矩形/椭圆/直线/箭头/画笔/文字/马赛克标注 → 复制、保存 PNG 或贴图。
-- **划词翻译**：在任意应用选中文本，按快捷键读取选区，并发请求百度、Google 和任意 OpenAI 兼容服务，在浮窗里并排对照。
+- **划词翻译**：在任意应用选中文本，按快捷键读取选区，并发请求百度、Google 和「AI 翻译」（从 AI供应商 里选择模型），在浮窗里并排对照。
 - **快速启动**：按快捷键唤起搜索浮窗，按名称筛选已安装应用和常用目录中的文件，上下键切换、回车打开。
 
 整个仓库是单个 `main` 包，没有 `internal/` 或子模块。界面文案、代码注释、提交信息统一用中文。
@@ -91,16 +91,17 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 - 控件几何在输入回调里通过 `handle.Bounds(c)` 读，不要捕获元素再查询。
 - `ui.Cmd` 在 macOS 是 Command，在 Windows/Linux 等于 Ctrl；`hotkey.go` 里专门避免非 macOS 输出 `Cmd`，否则会被解析成 Win 键导致注册失败。
 
-主界面结构：侧栏（品牌 + 可见导航）+ 内容区。`section` 取 `overview | translation | screenshot | launcher | settings`；`visibleSections` 根据三个插件开关决定是否显示对应 Tab，关闭插件后若当前 section 不可见会回退概览。响应式规则：窗口宽 `<980` 视为紧凑（侧栏 196、内边距 24），内容宽度封顶 1120；概览插件卡在 840/560 阈值下降为 3/2/1 列，Provider 卡片在 660/430 阈值下降为 3/2/1 列。主题固定深色暖琥珀（`theme.go`），不跟随系统明暗。
+主界面结构：侧栏（品牌 + 可见导航）+ 内容区。`section` 取 `overview | translation | screenshot | launcher | ai | settings`；`visibleSections` 根据三个插件开关决定是否显示对应 Tab，关闭插件后若当前 section 不可见会回退概览。「AI供应商」常驻显示，不受插件开关影响。响应式规则：窗口宽 `<980` 视为紧凑（侧栏 196、内边距 24），内容宽度封顶 1120；概览插件卡在 840/560 阈值下降为 3/2/1 列，Provider 卡片在 660/430 阈值下降为 3/2/1 列。主题固定深色暖琥珀（`theme.go`），不跟随系统明暗。
 
 ### 状态与配置
 
 - 配置路径是 `mygo.App.Path(PathUserData)/config.json`，模型在 `model.go`（camelCase，对齐原 Tauri 项目的配置结构），读写与迁移在 `config.go`。
 - `loadConfig`：文件不存在时写默认配置；解析失败回退默认值并记录 `loadErr`，不阻塞启动。
-- `migrateConfig` 负责：补 `schemaVersion`、补默认快捷键、非 macOS 去掉旧版误录的 `Cmd`、补 `TargetLang`、补 OpenAI 默认 Base URL、重算 `Configured`。迁移必须逐级判断：v1→v2 给启动器搜索源补 `true`，v2→v3 给 VSCode 命令补 `code`，v3→v4 给 Fork 命令补 `fork`，v4→v5 给 Trae 命令补 `trae`；v5→v6 只新增网页搜索字段，零值即可，不需要补数据。不能统一用 `< configSchemaVersion`，否则 v2 用户显式关闭的搜索源会被覆盖。`persist()` 必须写 `configSchemaVersion`。
+- `migrateConfig` 负责：补 `schemaVersion`、补默认快捷键、非 macOS 去掉旧版误录的 `Cmd`、补 `TargetLang`、补 OpenAI 默认 Base URL、重算 `Configured`。迁移必须逐级判断：v1→v2 给启动器搜索源补 `true`，v2→v3 给 VSCode 命令补 `code`，v3→v4 给 Fork 命令补 `fork`，v4→v5 给 Trae 命令补 `trae`；v5→v6 只新增网页搜索字段、v6→v7 只新增 AI 供应商字段，零值即可；v8→v9 把旧 OpenAI 翻译配置迁成 AI 供应商（必须在统一改写 schemaVersion 之前判断）。不能统一用 `< configSchemaVersion`，否则 v2 用户显式关闭的搜索源会被覆盖。`persist()` 必须写 `configSchemaVersion`。
 - 写入是原子的：先写 `.tmp` 再 `rename`，权限 `0600`。
 - **设置页没有保存按钮**，快捷键、目标语言、开关等改动立刻 `persist()`；测试 `TestManualSaveButtonsRemoved` 会守住这个约定。
-- **翻译凭据目前明文存在 config.json**（原版用系统钥匙串），代码注释已标为后续迁移项。新增字段时不要假设已有加密。
+- **翻译凭据和 AI 供应商的 API Key 目前明文存在 config.json**（原版用系统钥匙串），代码注释已标为后续迁移项。新增字段时不要假设已有加密。
+- `AISuppliers` 是独立于翻译插件的供应商列表（OpenAI 兼容：名称、Base URL、API Key、模型列表、启用状态），配置结构在 `model.go`，页面与弹窗在 `ai_suppliers.go`。添加/编辑共用 `aiSupplierModal`；模型通过 `GET {BaseURL}/models` 获取后多选（`fetchAISupplierModels` 是包级变量，测试可替换），也支持手动添加；请求使用 `newHTTPClient(false)` + Bearer API Key，超时 15s。划词翻译的「AI 翻译」通过 `Provider.SupplierID + Model` 引用这里的供应商和模型，发送请求前由 `resolveProvider` 填入 Base URL 与 API Key；供应商被删除或停用后该服务自动变为未配置。
 
 ### 截图流水线
 
@@ -129,7 +130,7 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 
 **请求**（`translate.go`）：
 
-- `translationProviders` 只保留 `Enabled && Configured` 的服务；OpenAI 兼容服务还必须有 Base URL。
+- `translationProviders` 只保留 `Enabled && Configured` 的服务；AI 翻译要求选好 `SupplierID` 和模型，地址/密钥在 `resolvedProviders()` 里从供应商解析。v8→v9 迁移会把旧版直接填写 Base URL/API Key 的 OpenAI 配置自动迁成一个 AI 供应商。
 - `translateAll` 并发请求，结果顺序与配置一致，单个失败不影响其他服务，超时 15s。
 - 接口地址（`baiduEndpoint`、`googleEndpoint`）是包级变量，测试用 `httptest` 替换。
 - `newHTTPClient` 默认 `Proxy = nil`，仅当服务开启「走系统代理」时接入 `netproxy.Proxy`。
@@ -186,6 +187,7 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 - 启动器测试分四层：`launcher_search_test.go` 覆盖评分/过滤/排序；`launcher_index_test.go` 用临时目录验证跳过规则、深度和上限；`launcher_projects_test.go` 覆盖「命令 + 空格」解析、下一级目录扫描和项目过滤；`launcher_test.go` 用 `ui.NewTester` 渲染浮窗，并注入假应用/文件/项目和 `launchApp`/`openPath`/`launchProject`，不启动真实应用。
 - `vscode_test.go` / `trae_test.go` 覆盖未知命令探测、shim 不覆盖已有文件、Windows 安装路径、缺失项目目录和项目模式；不会真的启动编辑器。
 - `websearch_test.go` 覆盖 URL 编码、触发词解析与补全、冲突校验、预设增删和占位符校验；打开浏览器通过注入函数断言，不会真的启动浏览器。
+- `ai_suppliers_test.go` 覆盖模型列表解析、保存校验、编辑/删除和页面渲染；保存测试把 `configPath` 指到临时目录，不写用户配置。
 - Windows 专属代码在单独的 `windows-latest` job 运行，macOS 的测试覆盖不到。
 - 改动共享状态时加 `-race`；改 UI 行为时优先补 Tester 测试。
 

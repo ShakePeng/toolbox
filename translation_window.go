@@ -136,7 +136,7 @@ func (s *translationSession) showNotice(msg string, allowEdit bool) {
 func (s *translationSession) startRequests() {
 	s.reqID++
 	id := s.reqID
-	usable := translationProviders(s.app.providers)
+	usable := translationProviders(s.app.resolvedProviders())
 	s.results = make([]translationResult, len(usable))
 	for i, p := range usable {
 		s.results[i] = translationResult{
@@ -560,7 +560,7 @@ func (s *translationSession) noticeSection(c *ui.Context) {
 }
 
 func (s *translationSession) resultsSection(c *ui.Context) {
-	usable := translationProviders(s.app.providers)
+	usable := translationProviders(s.app.resolvedProviders())
 	if len(usable) == 0 && len(s.results) == 0 {
 		ui.Row(c).Margin(10).Padding(13).Radius(11).Border(1, colLineStrong).
 			AlignItems(ui.Center).Gap(10).Children(func() {
@@ -592,9 +592,11 @@ func (s *translationSession) resultCard(c *ui.Context, idx int) {
 		Background(ui.RGBA(255, 255, 255, 0.04)).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
 			if svg := providerIcon(r.Kind); svg != nil {
-				ui.Row(c).Size(26, 26).Center().Children(func() {
-					ui.Icon(c, svg).FontSize(22).TextColor(brandColor(r.Kind))
-				})
+				// 品牌图标放在浅色底上，深色主题里也能看清轮廓和配色。
+				ui.Row(c).Size(26, 26).Radius(7).Center().Background(ui.Hex("#f4f4f6")).
+					Children(func() {
+						ui.Icon(c, svg).FontSize(17).TextColor(brandColor(r.Kind))
+					})
 			}
 			ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
 				ui.Text(c, r.Name).FontSize(14).Bold().MaxLines(1)

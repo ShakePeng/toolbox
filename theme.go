@@ -32,7 +32,8 @@ func brandColor(kind string) ui.Color {
 	case "google":
 		return ui.Hex("#4285f4")
 	case "openai-compatible":
-		return ui.Hex("#111111")
+		// 通用 AI 图标配浅色底，用深灰描边保证对比度。
+		return ui.Hex("#2b2c30")
 	}
 	return colTextMuted
 }

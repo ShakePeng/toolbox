@@ -32,6 +32,7 @@ type app struct {
 	langSel string
 
 	draft     *providerDraft
+	aiDraft   *aiSupplierDraft
 	recording string
 	// launcherSourceExpanded 只保存展开中的启动项，关闭设置页时也保留。
 	launcherSourceExpanded string
@@ -176,6 +177,7 @@ func (a *app) view(c *ui.Context) {
 				})
 			}
 			a.providerModal(c)
+			a.aiSupplierModal(c)
 		})
 	})
 }
@@ -318,6 +320,8 @@ func (a *app) content(c *ui.Context) {
 						a.screenshotSection(c)
 					case "launcher":
 						a.launcherSection(c)
+					case "ai":
+						a.aiSection(c)
 					case "settings":
 						a.settingsSection(c)
 					}
@@ -762,6 +766,7 @@ func (a *app) visibleSections() []sectionItem {
 	if a.settings.LauncherEnabled {
 		items = append(items, sectionItem{"launcher", "快速启动", "launcher"})
 	}
+	items = append(items, sectionItem{"ai", "AI供应商", "provider"})
 	items = append(items, sectionItem{"settings", "设置", "settings"})
 	return items
 }

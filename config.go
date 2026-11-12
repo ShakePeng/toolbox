@@ -71,6 +71,16 @@ func migrateConfig(cfg *Config) {
 		}
 	}
 	// v5 没有网页搜索配置；新字段零值就是「未启用」，不需要补数据。
+	// v6 没有 AI 供应商配置；列表零值即空，同样不需要补数据。
+	// v7 的 AI 供应商带 defaultModel，v8 起改用模型多选，旧字段直接忽略。
+	if len(cfg.Providers) == 0 {
+		cfg.Providers = defaultProviders()
+	}
+	// v8 的 AI 翻译直接存 Base URL/API Key；v9 起改为引用 AI 供应商。
+	// 必须在版本号统一改写之前判断。
+	if cfg.SchemaVersion < 9 {
+		migrateLegacyOpenAIProvider(cfg)
+	}
 	cfg.SchemaVersion = configSchemaVersion
 	cfg.Settings.SchemaVersion = configSchemaVersion
 
@@ -90,20 +100,80 @@ func migrateConfig(cfg *Config) {
 	if cfg.Settings.TargetLang == "" {
 		cfg.Settings.TargetLang = "auto"
 	}
-	if len(cfg.Providers) == 0 {
-		cfg.Providers = defaultProviders()
-	}
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
 		if p.Credentials == nil {
 			p.Credentials = map[string]string{}
 		}
-		// 早期版本把 OpenAI 的 Base URL 留空，导致只填 API Key 的服务
-		// 标记为“已配置”却无法请求；升级时补上默认地址。
-		if p.Kind == "openai-compatible" && strings.TrimSpace(p.BaseURL) == "" {
-			p.BaseURL = defaultOpenAIBaseURL
-		}
 		p.Configured = providerConfigured(*p)
+	}
+}
+
+// migrateLegacyOpenAIProvider 把旧版 AI 翻译里直接保存的地址和密钥迁到
+// 一个 AI 供应商，并让翻译引用它。已经是新配置的 Provider 会跳过。
+func migrateLegacyOpenAIProvider(cfg *Config) {
+	for i := range cfg.Providers {
+		p := &cfg.Providers[i]
+		if p.Kind != "openai-compatible" {
+			continue
+		}
+		if p.Name == "" || p.Name == "OpenAI" {
+			p.Name = "AI 翻译"
+			p.Description = "选择 AI 供应商中已启用的模型进行翻译。"
+		}
+		if strings.TrimSpace(p.SupplierID) != "" {
+			continue
+		}
+		apiKey := strings.TrimSpace(p.Credentials["apiKey"])
+		model := strings.TrimSpace(p.Model)
+		// 早期版本 Base URL 留空时按官方地址处理。
+		base := strings.TrimSpace(p.BaseURL)
+		if base == "" {
+			base = defaultOpenAIBaseURL
+		}
+		// 只有真正填过凭据或模型才迁移；旧版默认的官方地址不算配置痕迹。
+		if apiKey == "" && model == "" {
+			continue
+		}
+
+		id := ""
+		for _, supplier := range cfg.Settings.AISuppliers {
+			if strings.EqualFold(strings.TrimRight(supplier.BaseURL, "/"), strings.TrimRight(base, "/")) {
+				id = supplier.ID
+				break
+			}
+		}
+		if id == "" {
+			id = "ai-legacy-openai"
+			supplier := AISupplier{
+				ID: id, Name: "原有配置", BaseURL: base, APIKey: apiKey, Enabled: true,
+			}
+			if model != "" {
+				supplier.Models = []string{model}
+			}
+			cfg.Settings.AISuppliers = append(cfg.Settings.AISuppliers, supplier)
+		}
+		if model == "" {
+			for _, supplier := range cfg.Settings.AISuppliers {
+				if supplier.ID == id && len(supplier.Models) > 0 {
+					model = supplier.Models[0]
+					break
+				}
+			}
+		}
+		if model == "" {
+			model = "gpt-4.1-mini"
+			for j := range cfg.Settings.AISuppliers {
+				if cfg.Settings.AISuppliers[j].ID == id {
+					cfg.Settings.AISuppliers[j].Models = append(cfg.Settings.AISuppliers[j].Models, model)
+				}
+			}
+		}
+		p.SupplierID = id
+		p.Model = model
+		// 地址和密钥改由供应商提供，清掉 Provider 里的旧副本。
+		p.BaseURL = ""
+		p.Credentials = map[string]string{}
 	}
 }
 

@@ -207,28 +207,43 @@ func TestMigrateLegacyHotkeys(t *testing.T) {
 	}
 }
 
-// 只填 API Key 的 OpenAI 服务必须补上默认 Base URL，且判定为已配置。
-func TestMigrateOpenAIBaseURL(t *testing.T) {
-	if providerConfigured(Provider{
-		Kind:        "openai-compatible",
-		Credentials: map[string]string{"apiKey": "k"},
-	}) {
-		t.Fatal("没有 Base URL 的 OpenAI 服务不应判定为已配置")
+// 旧版只填 API Key 的 OpenAI 服务应迁移成 AI 供应商并关联到 AI 翻译。
+func TestMigrateLegacyOpenAIProvider(t *testing.T) {
+	if providerConfigured(Provider{Kind: "openai-compatible"}) {
+		t.Fatal("没有选择供应商和模型的 AI 翻译不应判定为已配置")
+	}
+	if !providerConfigured(Provider{Kind: "openai-compatible", SupplierID: "s1", Model: "m"}) {
+		t.Error("选好供应商和模型后应判定为已配置")
 	}
 
 	cfg := defaultConfig()
+	cfg.SchemaVersion = 8
 	cfg.Providers = []Provider{{
 		ID:          "openai",
 		Kind:        "openai-compatible",
 		Credentials: map[string]string{"apiKey": "k"},
+		Model:       "gpt-4o",
 	}}
 	migrateConfig(&cfg)
 	p := cfg.Providers[0]
-	if p.BaseURL != defaultOpenAIBaseURL {
-		t.Errorf("Base URL 应补为 %q，实际 %q", defaultOpenAIBaseURL, p.BaseURL)
+	if p.SupplierID == "" || p.BaseURL != "" || len(p.Credentials) != 0 {
+		t.Errorf("应改为引用 AI 供应商并清掉旧地址/密钥：%+v", p)
 	}
 	if !p.Configured {
-		t.Error("补上 Base URL 后应判定为已配置")
+		t.Error("迁移后应判定为已配置")
+	}
+	if p.Name != "AI 翻译" {
+		t.Errorf("旧版名称应改成 AI 翻译，实际 %q", p.Name)
+	}
+	var supplier AISupplier
+	for _, s := range cfg.Settings.AISuppliers {
+		if s.ID == p.SupplierID {
+			supplier = s
+		}
+	}
+	if supplier.BaseURL != defaultOpenAIBaseURL || supplier.APIKey != "k" ||
+		len(supplier.Models) != 1 || supplier.Models[0] != "gpt-4o" {
+		t.Errorf("供应商应继承旧地址、密钥和模型：%+v", supplier)
 	}
 }
 
@@ -244,7 +259,7 @@ func TestLangMapping(t *testing.T) {
 	}
 }
 
-// 启动器默认关闭，快捷键留空，搜索源默认开启。
+// 启动器默认关闭，快捷键留空，搜索源只默认开启应用搜索。
 func TestLauncherDefaults(t *testing.T) {
 	cfg := defaultConfig()
 	if cfg.SchemaVersion != configSchemaVersion || cfg.Settings.SchemaVersion != configSchemaVersion {
@@ -256,8 +271,11 @@ func TestLauncherDefaults(t *testing.T) {
 	if cfg.Settings.Hotkeys.Launcher != "" {
 		t.Errorf("启动器快捷键应默认留空，实际 %q", cfg.Settings.Hotkeys.Launcher)
 	}
-	if !cfg.Settings.LauncherSearchApps || !cfg.Settings.LauncherSearchFiles {
-		t.Error("应用和文件搜索源应默认开启")
+	if !cfg.Settings.LauncherSearchApps {
+		t.Error("应用搜索应默认开启")
+	}
+	if cfg.Settings.LauncherSearchFiles {
+		t.Error("文件搜索应默认关闭")
 	}
 	if cfg.Settings.LauncherVSCodeEnabled {
 		t.Error("VSCode 快速打开应默认关闭")

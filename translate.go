@@ -51,6 +51,50 @@ type providerOutput struct {
 	Detected string
 }
 
+// aiSupplierByID 返回指定 AI 供应商。
+func (a *app) aiSupplierByID(id string) (AISupplier, bool) {
+	if a == nil || strings.TrimSpace(id) == "" {
+		return AISupplier{}, false
+	}
+	for _, supplier := range a.settings.AISuppliers {
+		if supplier.ID == id {
+			return supplier, true
+		}
+	}
+	return AISupplier{}, false
+}
+
+// resolveProvider 把 AI 翻译引用的供应商地址和密钥填进 Provider 副本。
+// 供应商被删除或停用时标记为未配置，翻译列表就不再显示它。
+func (a *app) resolveProvider(p Provider) Provider {
+	if p.Kind != "openai-compatible" {
+		return p
+	}
+	supplier, ok := a.aiSupplierByID(p.SupplierID)
+	if !ok || !supplier.Enabled {
+		p.Configured = false
+		return p
+	}
+	p.BaseURL = supplier.BaseURL
+	p.Credentials = map[string]string{"apiKey": supplier.APIKey}
+	if strings.TrimSpace(p.Model) == "" && len(supplier.Models) > 0 {
+		p.Model = supplier.Models[0]
+	}
+	if strings.TrimSpace(p.Model) == "" {
+		p.Configured = false
+	}
+	return p
+}
+
+// resolvedProviders 返回填好供应商凭据的 Provider 副本，翻译请求统一用它。
+func (a *app) resolvedProviders() []Provider {
+	out := make([]Provider, len(a.providers))
+	for i, p := range a.providers {
+		out[i] = a.resolveProvider(p)
+	}
+	return out
+}
+
 // translationProviders 返回当前已启用且配置完整的服务，顺序与配置一致。
 func translationProviders(providers []Provider) []Provider {
 	out := make([]Provider, 0, len(providers))
@@ -111,7 +155,7 @@ func (a *app) testProvider(idx int) {
 	if idx < 0 || idx >= len(a.providers) {
 		return
 	}
-	p := a.providers[idx]
+	p := a.resolveProvider(a.providers[idx])
 	a.toast(p.Name + "：正在测试连接…")
 
 	go func() {

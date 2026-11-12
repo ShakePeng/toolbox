@@ -60,7 +60,7 @@ func (a *app) startTranslation() {
 		a.translationNotice("划词翻译未开启，请先在概览中打开", false)
 		return
 	}
-	if len(translationProviders(a.providers)) == 0 {
+	if len(translationProviders(a.resolvedProviders())) == 0 {
 		a.translationNotice("请先在翻译页配置并启用至少一个翻译服务", false)
 		return
 	}
