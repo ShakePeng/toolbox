@@ -82,7 +82,9 @@ func TestForkSettingsCard(t *testing.T) {
 	a.settings.LauncherForkCommand = "fork"
 	a.settings.LauncherForkFolders = []string{"/repos"}
 
-	tt := ui.NewTester(a.view, 1080, 760)
+	// Windows 字体行高比 macOS 大，760 高时 Fork 卡片刚好压在窗口底边外，
+	// 这里给足高度，避免测试因平台字体度量失败。
+	tt := ui.NewTester(a.view, 1080, 900)
 	if err := tt.Click("快速启动"); err != nil {
 		t.Fatalf("点击“快速启动”失败：%v", err)
 	}
