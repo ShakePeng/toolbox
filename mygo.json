@@ -1,7 +1,7 @@
 {
   "name": "toolbox",
   "identifier": "com.example.toolbox",
-  "version": "1.0.11",
+  "version": "1.0.10",
   "out": "build",
   "updates": {
     "publicKey": "pYVqpPOTgfNGfIWcbHh7veS7Bm8c8Ti6ink+1y3TWz0=",
