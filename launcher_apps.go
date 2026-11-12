@@ -58,8 +58,12 @@ func (s *launcherSession) ensureApps() {
 	}()
 }
 
+// lookupSpotlightNames 允许测试注入，默认走 Spotlight（mdls）。
+var lookupSpotlightNames = spotlightAppNames
+
 func buildLauncherAppEntries(apps []mygo.InstalledApp) []launcherAppEntry {
-	entries := make([]launcherAppEntry, 0, len(apps))
+	candidates := make([]mygo.InstalledApp, 0, len(apps))
+	paths := make([]string, 0, len(apps))
 	seen := make(map[string]struct{}, len(apps))
 	for _, app := range apps {
 		if strings.TrimSpace(app.Path) == "" {
@@ -70,12 +74,36 @@ func buildLauncherAppEntries(apps []mygo.InstalledApp) []launcherAppEntry {
 			continue
 		}
 		seen[key] = struct{}{}
-		alt := strings.TrimSuffix(filepath.Base(app.Path), filepath.Ext(app.Path))
+		candidates = append(candidates, app)
+		paths = append(paths, app.Path)
+	}
+
+	// Spotlight 的名字与 Finder/Launchpad 一致，系统自带应用的中文名只在这里；
+	// 索引不可用时再读 bundle 内的本地化字符串，最后回退系统名。
+	spot := lookupSpotlightNames(paths)
+	entries := make([]launcherAppEntry, 0, len(candidates))
+	for _, app := range candidates {
+		name := strings.TrimSpace(spot[app.Path])
+		if name == "" {
+			name = localizedAppName(app.Path)
+		}
+		if name == "" {
+			name = app.Name
+		}
+		aliases := []string{
+			strings.TrimSuffix(filepath.Base(app.Path), filepath.Ext(app.Path)),
+			app.ID,
+		}
+		// 显示名被本地化后，原名仍要能搜到（如「微信」与 WeChat）。
+		if name != app.Name {
+			aliases = append(aliases, app.Name)
+			app.Name = name
+		}
 		entries = append(entries, launcherAppEntry{
 			app:       app,
-			nameLower: strings.ToLower(app.Name),
+			nameLower: strings.ToLower(name),
 			pathLower: strings.ToLower(strings.ReplaceAll(app.Path, "\\", "/")),
-			altLower:  strings.ToLower(alt + " " + app.ID),
+			altLower:  strings.ToLower(strings.TrimSpace(strings.Join(aliases, " "))),
 		})
 	}
 	return entries

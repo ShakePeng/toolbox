@@ -190,11 +190,11 @@ func TestLauncherSettingsPageHasNoSaveButton(t *testing.T) {
 	a.settings.LauncherEnabled = true
 	tt := ui.NewTester(a.view, 980, 680)
 
-	if err := tt.Click("启动"); err != nil {
+	if err := tt.Click("快速启动"); err != nil {
 		t.Fatalf("点击“启动”导航失败：%v", err)
 	}
-	if !tt.HasText("唤起快捷键") || !tt.HasText("搜索源") {
-		t.Fatalf("启动页应显示快捷键和搜索源，实际文本：%q", tt.Texts())
+	if !tt.HasText("唤起快捷键") || !tt.HasText("启动项") {
+		t.Fatalf("启动页应显示快捷键和启动项，实际文本：%q", tt.Texts())
 	}
 	if tt.HasText("保存启动器设置") {
 		t.Error("启动页不应显示保存按钮")
@@ -251,7 +251,7 @@ func TestLauncherProjectModeRequiresSpace(t *testing.T) {
 	s, _ := newTestProjectLauncher()
 	s.query = "code"
 	s.rebuildResults()
-	if _, ok := s.projectQuery(); ok {
+	if _, _, ok := s.projectQuery(); ok {
 		t.Fatal("没有空格时不应进入项目模式")
 	}
 	for _, item := range s.results {
@@ -282,12 +282,26 @@ func TestLauncherVSCodeSettingsVisible(t *testing.T) {
 	a.settings.LauncherVSCodeFolders = []string{"/projects"}
 
 	tt := ui.NewTester(a.view, 1080, 760)
-	if err := tt.Click("启动"); err != nil {
+	if err := tt.Click("快速启动"); err != nil {
 		t.Fatalf("点击“启动”失败：%v", err)
 	}
-	for _, want := range []string{"VSCode 快速打开", "命令", "项目文件夹", "/projects"} {
+	// 未展开时只显示标题行，配置内容收在抽屉里。
+	for _, want := range []string{"VS Code 快速打开", "应用搜索", "文件搜索"} {
 		if !tt.HasText(want) {
-			t.Errorf("启动页应显示 %q，实际文本：%q", want, tt.Texts())
+			t.Errorf("启动项列表应显示 %q，实际文本：%q", want, tt.Texts())
+		}
+	}
+	if tt.HasText("项目文件夹") {
+		t.Errorf("未展开时不应显示 VSCode 配置，实际文本：%q", tt.Texts())
+	}
+
+	// 点击整行展开抽屉，露出命令与项目文件夹配置。
+	if err := tt.Click("展开或收起 VS Code 快速打开"); err != nil {
+		t.Fatalf("点击 VSCode 启动项行失败：%v", err)
+	}
+	for _, want := range []string{"触发词", "项目文件夹", "/projects"} {
+		if !tt.HasText(want) {
+			t.Errorf("展开后应显示 %q，实际文本：%q", want, tt.Texts())
 		}
 	}
 	if tt.HasText("保存启动器设置") {

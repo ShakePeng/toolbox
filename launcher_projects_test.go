@@ -33,7 +33,7 @@ func TestProjectQuery(t *testing.T) {
 	for _, c := range cases {
 		s := newProjectTestSession(c.command)
 		s.query = c.query
-		got, ok := s.projectQuery()
+		_, got, ok := s.projectQuery()
 		if got != c.want || ok != c.ok {
 			t.Errorf("command=%q query=%q → (%q,%v)，期望 (%q,%v)", c.command, c.query, got, ok, c.want, c.ok)
 		}
@@ -42,7 +42,7 @@ func TestProjectQuery(t *testing.T) {
 	s := newProjectTestSession("code")
 	s.app.settings.LauncherVSCodeEnabled = false
 	s.query = "code alpha"
-	if _, ok := s.projectQuery(); ok {
+	if _, _, ok := s.projectQuery(); ok {
 		t.Error("功能关闭时不应进入项目模式")
 	}
 }
@@ -63,7 +63,7 @@ func TestScanProjectFolders(t *testing.T) {
 	}
 
 	missing := filepath.Join(root2, "does-not-exist")
-	projects, errs := scanProjectFolders([]string{root1, root2, missing}, 100)
+	projects, errs := scanProjectFolders([]string{root1, root2, missing}, 100, false)
 
 	var names []string
 	for _, p := range projects {
@@ -91,7 +91,7 @@ func TestScanProjectFoldersLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	projects, _ := scanProjectFolders([]string{root}, 2)
+	projects, _ := scanProjectFolders([]string{root}, 2, false)
 	if len(projects) != 2 {
 		t.Fatalf("应限制为 2 个，实际 %d", len(projects))
 	}

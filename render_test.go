@@ -34,6 +34,9 @@ func TestRenderSnapshots(t *testing.T) {
 		{"screenshot_1080", "screenshot", 1080, 760, false},
 		{"launcher_1080", "launcher", 1080, 760, false},
 		{"launcher_vscode_1080", "launcher", 1080, 760, false},
+		{"launcher_vscode_expanded_1080", "launcher", 1080, 760, false},
+		{"launcher_apps_expanded_1080", "launcher", 1080, 760, false},
+		{"launcher_fork_expanded_1080", "launcher", 1080, 760, false},
 		{"settings_1080", "settings", 1080, 760, false},
 		{"modal_1080", "translation", 1080, 760, true},
 		// 收窄到最小窗口，验证堆叠/降列
@@ -49,10 +52,23 @@ func TestRenderSnapshots(t *testing.T) {
 		if s.sec == "launcher" {
 			a.settings.LauncherEnabled = true
 		}
-		if s.name == "launcher_vscode_1080" {
+		if s.name == "launcher_vscode_1080" || s.name == "launcher_vscode_expanded_1080" {
 			a.settings.LauncherVSCodeEnabled = true
 			a.settings.LauncherVSCodeCommand = "code"
 			a.settings.LauncherVSCodeFolders = []string{"~/projects", "~/work"}
+		}
+		// 展开态快照：验证配置抽屉在卡片内的排版，以及没有内容的项不会留出空抽屉。
+		if s.name == "launcher_vscode_expanded_1080" {
+			a.launcherSourceExpanded = "vscode"
+		}
+		if s.name == "launcher_apps_expanded_1080" {
+			a.launcherSourceExpanded = "apps"
+		}
+		if s.name == "launcher_fork_expanded_1080" {
+			a.settings.LauncherForkEnabled = true
+			a.settings.LauncherForkCommand = "fork"
+			a.settings.LauncherForkFolders = []string{"~/workSpace", "~/studySpace"}
+			a.launcherSourceExpanded = "fork"
 		}
 		if s.open {
 			a.draft = newDraft(2, a.providers[2]) // openai
@@ -103,17 +119,39 @@ func TestRenderSnapshots(t *testing.T) {
 	project, _ := newTestProjectLauncher()
 	project.query = "code "
 	project.rebuildResults()
-	pt := ui.NewTester(project.view, launcherWidth, project.desiredHeight())
-	pt.Frame()
-	if img := pt.Image(); img != nil {
-		f, err := os.Create(filepath.Join(outDir, "launcher_projects.png"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := png.Encode(f, img); err != nil {
-			t.Fatal(err)
-		}
-		f.Close()
-		t.Logf("wrote launcher_projects.png")
+	renderSession("launcher_projects.png", project)
+
+	// Fork 项目模式：只列 Git 仓库，结果图标用 Fork 应用图标。
+	fork, _, _ := newTestLauncherSession()
+	fork.app.settings.LauncherVSCodeEnabled = false
+	fork.app.settings.LauncherForkEnabled = true
+	fork.app.settings.LauncherForkCommand = "fork"
+	fork.app.settings.LauncherForkFolders = []string{"/repos"}
+	fork.projects = []launcherProjectEntry{
+		{path: "/repos/alpha", name: "Alpha", root: "/repos", nameLower: "alpha", pathLower: "/repos/alpha"},
+		{path: "/repos/beta", name: "Beta", root: "/repos", nameLower: "beta", pathLower: "/repos/beta"},
+	}
+	fork.projectsLoaded = true
+	fork.projectRootsSig = "fork\x00/repos"
+	fork.query = "fork "
+	fork.rebuildResults()
+	renderSession("launcher_fork_projects.png", fork)
+}
+
+// renderSession 把一个启动器会话渲染成 PNG 快照。
+func renderSession(name string, s *launcherSession) {
+	tt := ui.NewTester(s.view, launcherWidth, s.desiredHeight())
+	tt.Frame()
+	img := tt.Image()
+	if img == nil {
+		panic("空快照：" + name)
+	}
+	f, err := os.Create(filepath.Join(os.TempDir(), "toolbox_render", name))
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		panic(err)
 	}
 }

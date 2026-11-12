@@ -33,6 +33,8 @@ type app struct {
 
 	draft     *providerDraft
 	recording string
+	// launcherSourceExpanded 只保存展开中的启动项，关闭设置页时也保留。
+	launcherSourceExpanded string
 
 	// updatesOn 表示更新插件已装配（main 里 mygo.Use 之后才为 true）。
 	// 单元测试不跑 main，靠它跳过更新相关的调用。
@@ -56,6 +58,8 @@ type app struct {
 	launcher *launcherSession
 	// vscode 保存自定义命令的探测结果，供启动页和项目模式使用。
 	vscode vscodeState
+	// fork 保存 Fork 的探测结果，没有 CLI 时回退应用本体。
+	fork forkState
 }
 
 // refreshMain 让主窗口重绘。后台加载完成后用它同步设置页的状态。
@@ -748,13 +752,13 @@ func ghostBtn(c *ui.Context, label string) ui.Element {
 func (a *app) visibleSections() []sectionItem {
 	items := []sectionItem{{"overview", "概览", "home"}}
 	if a.settings.TranslationEnabled {
-		items = append(items, sectionItem{"translation", "翻译", "translate"})
+		items = append(items, sectionItem{"translation", "划词翻译", "translate"})
 	}
 	if a.settings.ScreenshotEnabled {
-		items = append(items, sectionItem{"screenshot", "截图", "screenshot"})
+		items = append(items, sectionItem{"screenshot", "截图标注", "screenshot"})
 	}
 	if a.settings.LauncherEnabled {
-		items = append(items, sectionItem{"launcher", "启动", "launcher"})
+		items = append(items, sectionItem{"launcher", "快速启动", "launcher"})
 	}
 	items = append(items, sectionItem{"settings", "设置", "settings"})
 	return items

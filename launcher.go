@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	launcherWidth      = 640
-	launcherHeight     = 540 // 结果区域的最大窗口高度
-	launcherMaxResults = 8   // 540 高度下正好能完整显示 8 行，避免键盘选中被滚动截断
+	launcherWidth        = 640
+	launcherHeight       = 540 // 结果区域的最大窗口高度
+	launcherCornerRadius = 16
+	launcherMaxResults   = 8 // 540 高度下正好能完整显示 8 行，避免键盘选中被滚动截断
 
 	// 原生 UI 没有内容自适应高度，这里按各区域的实际占位累加。
 	launcherHeaderHeight = 67
@@ -50,15 +51,18 @@ type launcherSession struct {
 	projectErrs     []string
 	projectRootsSig string
 	projectGen      int
+	// projectSource 是当前匹配到的项目源（vscode / fork），供打开与状态行使用。
+	projectSource string
 
 	icons   map[string]*launcherIcon
 	iconSem chan struct{}
 
 	// 这几个函数允许测试注入，默认走 mygo.Shell。
-	loadAppIcon   func(path string, size int) ([]byte, error)
-	launchApp     func(mygo.InstalledApp) error
-	openPath      func(string) error
-	launchProject func(string) error
+	loadAppIcon       func(path string, size int) ([]byte, error)
+	launchApp         func(mygo.InstalledApp) error
+	openPath          func(string) error
+	launchProject     func(string) error
+	launchForkProject func(string) error
 
 	gen       int
 	closed    bool
@@ -71,13 +75,14 @@ type launcherSession struct {
 
 func newLauncherSession(a *app) *launcherSession {
 	s := &launcherSession{
-		app:           a,
-		loadAppIcon:   mygo.Shell.FileIcon,
-		launchApp:     mygo.Shell.LaunchApp,
-		openPath:      mygo.Shell.OpenPath,
-		launchProject: a.openFolderInVSCode,
-		icons:         make(map[string]*launcherIcon),
-		iconSem:       make(chan struct{}, launcherIconConcurrency),
+		app:               a,
+		loadAppIcon:       mygo.Shell.FileIcon,
+		launchApp:         mygo.Shell.LaunchApp,
+		openPath:          mygo.Shell.OpenPath,
+		launchProject:     a.openFolderInVSCode,
+		launchForkProject: a.openFolderInFork,
+		icons:             make(map[string]*launcherIcon),
+		iconSem:           make(chan struct{}, launcherIconConcurrency),
 	}
 	s.win = mygo.NewWindow(mygo.WindowOptions{
 		Title:             "快速启动",
@@ -86,6 +91,7 @@ func newLauncherSession(a *app) *launcherSession {
 		Hidden:            true,
 		Frameless:         true,
 		Transparent:       true,
+		CornerRadius:      launcherCornerRadius,
 		Panel:             true,
 		AlwaysOnTop:       true,
 		SkipTaskbar:       true,
@@ -226,9 +232,13 @@ func (s *launcherSession) rebuildResults() {
 		return
 	}
 	// 输入“命令 + 空格”时切到项目模式：只列配置文件夹的下一级项目。
-	if query, ok := s.projectQuery(); ok {
-		s.ensureProjects()
-		s.app.ensureVSCodeProbe()
+	if src, query, ok := s.projectQuery(); ok {
+		s.ensureProjects(src)
+		if src.id == "fork" {
+			s.app.ensureForkProbe()
+		} else {
+			s.app.ensureVSCodeProbe()
+		}
 		s.results = filterLauncherProjects(query, s.projects, launcherMaxResults)
 		s.selected = clampLauncherSelection(s.selected, len(s.results), 0)
 		s.fitHeight()
@@ -341,8 +351,12 @@ func (s *launcherSession) activate(i int) {
 			err = s.launchApp(item.app)
 		}
 	case launcherKindProject:
-		if s.launchProject != nil {
-			err = s.launchProject(item.path)
+		launch := s.launchProject
+		if s.projectSource == "fork" {
+			launch = s.launchForkProject
+		}
+		if launch != nil {
+			err = launch(item.path)
 		}
 	default:
 		if s.openPath != nil {
@@ -367,7 +381,8 @@ func (s *launcherSession) view(c *ui.Context) {
 		s.hide()
 	}
 	ui.Themed(c, sToolsTheme()).Fill().Background(ui.Transparent).Children(func() {
-		ui.Column(c).Fill().Radius(16).Border(1, colLineStrong).
+		// 原生窗口负责圆角和阴影，这里只保留内容，不再重复画一圈圆角描边。
+		ui.Column(c).Fill().Radius(launcherCornerRadius).
 			Gradient(ui.Hex("#2b2c30"), ui.Hex("#202124"), 180).Children(func() {
 			s.header(c)
 			// 没有输入时只保留搜索框，不展示结果和底部状态。
@@ -439,19 +454,28 @@ func (s *launcherSession) emptyState(c *ui.Context) {
 
 func (s *launcherSession) emptyHint() (string, string) {
 	settings := s.app.settings
-	if _, ok := s.projectQuery(); ok {
-		roots := s.projectRoots()
+	if src, _, ok := s.projectQuery(); ok {
+		roots := normalizeProjectFolders(src.folders)
 		switch {
 		case len(roots) == 0:
-			return "还没有配置项目文件夹", "到主窗口的「启动」页添加项目文件夹。"
+			return "还没有配置项目文件夹", "到主窗口的「启动」页添加 " + src.label + " 项目文件夹。"
 		case s.projectsLoading:
+			if src.gitOnly {
+				return "正在扫描 Git 仓库…", "只列出项目文件夹下一级含 .git 的目录。"
+			}
 			return "正在扫描项目文件夹…", "只扫描每个文件夹的下一级目录。"
 		case len(s.projectErrs) > 0 && len(s.projects) == 0:
 			return "无法读取项目文件夹", strings.Join(s.projectErrs, "；")
-		case settings.LauncherVSCodeEnabled && s.app.vscode.checking:
-			return "正在检测 VSCode 命令…", "检测完成后即可打开项目。"
-		case settings.LauncherVSCodeEnabled && s.app.vscode.err != "":
-			return "VSCode 命令不可用", s.app.vscode.err
+		case src.id == "fork" && s.app.fork.checking:
+			return "正在检测 Fork 命令…", "检测完成后即可打开项目。"
+		case src.id == "fork" && s.app.fork.err != "":
+			return "Fork 不可用", s.app.fork.err
+		case src.id != "fork" && settings.LauncherVSCodeEnabled && s.app.vscode.checking:
+			return "正在检测 VS Code 命令…", "检测完成后即可打开项目。"
+		case src.id != "fork" && settings.LauncherVSCodeEnabled && s.app.vscode.err != "":
+			return "VS Code 命令不可用", s.app.vscode.err
+		case src.gitOnly:
+			return "没有找到 Git 仓库", "换个关键字，或到「启动」页检查文件夹。"
 		default:
 			return "没有找到匹配的项目", "换个关键字，或到「启动」页检查文件夹。"
 		}
@@ -468,7 +492,9 @@ func (s *launcherSession) emptyHint() (string, string) {
 	case s.appsErr != "":
 		return "加载应用失败", s.appsErr
 	case settings.LauncherVSCodeEnabled && strings.EqualFold(strings.TrimSpace(s.query), s.app.vscodeCommand()):
-		return "输入 " + s.app.vscodeCommand() + " + 空格 搜索项目", "空格会进入 VSCode 项目模式。"
+		return "输入 " + s.app.vscodeCommand() + " + 空格 搜索项目", "空格会进入 VS Code 项目模式。"
+	case settings.LauncherForkEnabled && strings.EqualFold(strings.TrimSpace(s.query), s.app.forkCommand()):
+		return "输入 " + s.app.forkCommand() + " + 空格 搜索仓库", "空格会进入 Fork 项目模式，只列出 Git 仓库。"
 	case strings.TrimSpace(s.query) == "" && settings.LauncherSearchFiles && s.appsLoaded && len(s.apps) == 0:
 		return "输入关键字搜索文件", "没有找到已安装应用，文件搜索仍然可用。"
 	default:
@@ -503,6 +529,10 @@ func (s *launcherSession) resultRow(c *ui.Context, i int) {
 
 func (s *launcherSession) itemIcon(c *ui.Context, item launcherItem) {
 	if item.kind == launcherKindProject {
+		if toolIcon := launcherToolIcons[s.projectSource]; toolIcon != nil {
+			ui.Image(c, toolIcon).Size(28, 28)
+			return
+		}
 		iconTile(c, "code", 28, 8, colAccentSoft, colAccentStr)
 		return
 	}
@@ -525,8 +555,8 @@ func (s *launcherSession) footer(c *ui.Context) {
 	ui.Row(c).MinHeight(36).Padding(8, 14).AlignItems(ui.Center).Gap(8).
 		BorderWidth(1, 0, 0, 0).BorderColor(colLine).Children(func() {
 		hint := "↑↓ 选择 · ↵ 打开 · Esc 关闭"
-		if _, ok := s.projectQuery(); ok {
-			hint = "↑↓ 选择 · ↵ 用 VSCode 打开 · Esc 关闭"
+		if src, _, ok := s.projectQuery(); ok {
+			hint = "↑↓ 选择 · ↵ 用 " + src.label + " 打开 · Esc 关闭"
 		}
 		ui.Text(c, hint).FontSize(11).TextColor(colTextMuted).MaxLines(1)
 		ui.Spacer(c)
@@ -540,7 +570,7 @@ func (s *launcherSession) statusLine() string {
 	if s.app == nil {
 		return ""
 	}
-	if _, ok := s.projectQuery(); ok {
+	if _, _, ok := s.projectQuery(); ok {
 		return s.projectStatusLine()
 	}
 	var parts []string
@@ -607,150 +637,253 @@ func (a *app) launcherSection(c *ui.Context) {
 	hotkeyBody := func() {
 		a.hotkeyRecorder(c, "launcher")
 	}
-	sourceBody := func() {
-		a.launcherSourceRow(c, "应用", "从已安装应用中选择，并显示真实图标。",
-			&a.settings.LauncherSearchApps, "搜索应用")
-		a.launcherSourceRow(c, "文件", "桌面、下载、文档和主目录浅层。",
-			&a.settings.LauncherSearchFiles, "搜索文件")
-	}
-	if a.twoColumn(c) {
-		ui.Row(c).Gap(14).AlignItems(ui.Stretch).Children(func() {
-			a.settingsSection2(c, "keyboard", "唤起快捷键", "留空时不注册，录制后立即生效。", hotkeyBody).Grow(1)
-			a.settingsSection2(c, "launcher", "搜索源", "只在这里切换，浮窗内不提供开关。", sourceBody).Grow(1)
-		})
-	} else {
-		ui.Column(c).Gap(14).Children(func() {
-			a.settingsSection2(c, "keyboard", "唤起快捷键", "留空时不注册，录制后立即生效。", hotkeyBody)
-			a.settingsSection2(c, "launcher", "搜索源", "只在这里切换，浮窗内不提供开关。", sourceBody)
-		})
-	}
+	a.settingsSection2(c, "keyboard", "唤起快捷键", "留空时不注册，录制后立即生效。", hotkeyBody)
 
-	a.launcherVSCodeCard(c)
-
-	a.settingsSection2(c, "cursor", "使用方式", "唤起后直接用键盘操作。", func() {
-		for _, line := range []string{
-			"输入关键字筛选应用和文件，结果会随输入实时更新。",
-			"↑ / ↓ 切换选中项，回车打开；Esc 或点击窗口外部关闭。",
-			"首次唤起会在后台加载应用并建立文件索引。",
-		} {
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, icon("arrow")).FontSize(11).TextColor(colAccentStr)
-				ui.Text(c, line).FontSize(12).TextColor(colTextSoft)
+	a.settingsSection2(c, "launcher", "启动项", "点击卡片展开或收起配置，开关可独立切换。", func() {
+		ui.Column(c).Gap(10).Children(func() {
+			a.launcherSourceItem(c, "apps", "应用搜索", "搜索已安装应用", &a.settings.LauncherSearchApps, func() {
+				ui.Column(c).Gap(7).Children(func() {
+					ui.Text(c, "从系统已安装应用中检索，结果显示真实图标。").
+						FontSize(12).TextColor(colTextSoft)
+					ui.Text(c, a.launcherAppStatus()).FontSize(11).TextColor(colTextMuted).MaxLines(2)
+				})
 			})
-		}
-	})
-
-	a.launcherIndexCard(c)
-}
-
-func (a *app) launcherSourceRow(c *ui.Context, title, desc string, on *bool, label string) {
-	ui.Row(c).AlignItems(ui.Center).Children(func() {
-		ui.Column(c).Grow(1).Gap(3).Children(func() {
-			ui.Text(c, title).FontSize(13)
-			ui.Text(c, desc).FontSize(11).TextColor(colTextMuted)
-		})
-		if ui.Switch(c, on).Label(label).Changed() {
-			a.afterLauncherSourceChange()
-		}
-	})
-}
-
-// launcherVSCodeCard 是启动页里的自定义命令配置。默认关闭，开启后才
-// 展示命令、检测状态和项目文件夹。
-func (a *app) launcherVSCodeCard(c *ui.Context) {
-	enabled := a.settings.LauncherVSCodeEnabled
-	bg, fg := colBgSoft, colTextSoft
-	if enabled {
-		bg, fg = colAccentSoft, colAccentStr
-	}
-	ui.Column(c).Padding(20).Radius(17).Background(colCard).Border(1, colLine).
-		Shadow(0, 2, 12, 0, shadowCard).Children(func() {
-		ui.Row(c).Gap(13).AlignItems(ui.Center).Children(func() {
-			iconTile(c, "code", 38, 11, bg, fg)
-			ui.Column(c).Grow(1).Gap(3).Children(func() {
-				ui.Text(c, "VSCode 快速打开").FontSize(16).Bold()
-				ui.Text(c, "输入命令 + 空格，从配置的文件夹中打开项目。").FontSize(12).TextColor(colTextSoft)
+			a.launcherSourceItem(c, "files", "文件搜索", "搜索桌面、下载、文档和主目录浅层", &a.settings.LauncherSearchFiles, func() {
+				ui.Column(c).Gap(7).Children(func() {
+					ui.Text(c, "文件索引在首次唤起时建立，覆盖常用目录，不做全盘搜索。").
+						FontSize(12).TextColor(colTextSoft)
+					ui.Text(c, a.launcherFileStatus()).FontSize(11).TextColor(colTextMuted).MaxLines(2)
+					if secondaryBtn(c, "重建文件索引").Clicked() {
+						if a.launcher == nil {
+							a.toast("首次唤起时会自动建立索引")
+							return
+						}
+						a.launcher.rebuildCaches()
+						a.toast("正在重建索引…")
+					}
+				})
 			})
-			if ui.Switch(c, &a.settings.LauncherVSCodeEnabled).Label("VSCode 快速打开").Changed() {
-				a.afterVSCodeToggle()
-			}
-		})
-		if !a.settings.LauncherVSCodeEnabled {
-			ui.Text(c, "开启后可以配置命令和项目文件夹，首次开启会自动检测 code 命令。").
-				FontSize(11).TextColor(colTextMuted).Margin(14, 0, 0, 0)
-			return
-		}
-		ui.Column(c).Margin(18, 0, 0, 0).Gap(14).Children(func() {
-			a.vscodeCommandRow(c)
-			a.vscodeFolderSection(c)
+			a.launcherSourceItem(c, "vscode", "VS Code 快速打开", "输入触发词 + 空格，快速打开项目", &a.settings.LauncherVSCodeEnabled, func() {
+				if a.settings.LauncherVSCodeEnabled {
+					ui.Column(c).Gap(16).Children(func() {
+						a.vscodeCommandRow(c)
+						a.vscodeFolderSection(c)
+					})
+					return
+				}
+				ui.Text(c, "开启后配置命令和项目文件夹，首次开启会自动检测 VS Code。").
+					FontSize(12).TextColor(colTextMuted)
+			})
+			a.launcherSourceItem(c, "fork", "Fork 快速打开", "输入触发词 + 空格，用 Fork 打开 Git 仓库", &a.settings.LauncherForkEnabled, func() {
+				if a.settings.LauncherForkEnabled {
+					ui.Column(c).Gap(16).Children(func() {
+						a.forkCommandRow(c)
+						a.forkFolderSection(c)
+					})
+					return
+				}
+				ui.Text(c, "开启后配置命令和项目文件夹；Fork 只能打开 Git 仓库，列表只列含 .git 的目录。").
+					FontSize(12).TextColor(colTextMuted)
+			})
 		})
 	})
 }
 
-func (a *app) vscodeCommandRow(c *ui.Context) {
-	ui.Column(c).Gap(7).Children(func() {
-		ui.Text(c, "命令").FontSize(11).Bold().TextColor(colTextSoft)
-		in := ui.TextInput(c.Key("vscode-command"), &a.settings.LauncherVSCodeCommand).
-			Placeholder("code").Label("VSCode 命令").Height(40).WidthPercent(100)
-		if in.Changed() {
-			if err := a.persist(); err != nil {
-				a.toast("保存失败：" + err.Error())
+// 启动项卡片使用的品牌图标，没有时退回通用线性图标。
+var launcherToolIcons = map[string]ui.ImageSource{
+	"vscode": vscodeIcon,
+	"fork":   forkIcon,
+}
+
+// launcherSourceItem 每个启动项一张卡片：标题行点击展开/收起，配置抽屉收在卡片内。
+func (a *app) launcherSourceItem(c *ui.Context, id, title, desc string, on *bool, body func()) {
+	// 没有配置内容的启动项不参与展开，避免出现一块空抽屉和多余的分隔线。
+	expandable := body != nil
+	expanded := expandable && a.launcherSourceExpanded == id
+	bg := colBg
+	border := colLine
+	if expanded {
+		bg = ui.Hex("#26272b")
+		border = colLineStrong
+	}
+	ui.Column(c.Key("launcher-source-"+id)).Radius(12).Background(bg).
+		Border(1, border).Children(func() {
+		header := ui.Row(c).Padding(14, 16).Gap(12).AlignItems(ui.Center)
+		if expandable {
+			header.Label("展开或收起 " + title)
+		}
+		header.Children(func() {
+			if toolIcon := launcherToolIcons[id]; toolIcon != nil {
+				ui.Image(c, toolIcon).Size(30, 30)
 			} else {
-				a.detectVSCodeCommand()
-				if a.launcher != nil {
-					a.launcher.vscodeChanged()
+				iconName := "app"
+				if id == "files" {
+					iconName = "file"
+				}
+				iconTile(c, iconName, 30, 9, colBgSoft, colTextSoft)
+			}
+			ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
+				ui.Text(c, title).FontSize(13).Bold()
+				ui.Text(c, desc).FontSize(11).TextColor(colTextMuted).MaxLines(2)
+			})
+			if ui.Switch(c, on).Label(title + "开关").Changed() {
+				switch id {
+				case "vscode":
+					a.afterVSCodeToggle()
+				case "fork":
+					a.afterForkToggle()
+				default:
+					a.afterLauncherSourceChange()
 				}
 			}
+			if expandable {
+				ui.Icon(c, icon("chevron-down")).FontSize(16).TextColor(colTextMuted).
+					Rotate(map[bool]float32{true: 180}[expanded])
+			}
+		})
+		if expandable && header.Clicked() {
+			if expanded {
+				a.launcherSourceExpanded = ""
+			} else {
+				a.launcherSourceExpanded = id
+			}
+		}
+		// 开关事件不在卡片点击里处理，避免操作开关时同时触发展开/收起。
+		if !expanded {
+			return
+		}
+		ui.Column(c).Margin(0, 16, 0, 0).Padding(14, 16).BorderWidth(1, 0, 0, 0).
+			BorderColor(colLine).Children(body)
+	})
+}
+
+// projectTool 汇总一个项目工具（VS Code / Fork）在设置页需要的状态与回调。
+// 两者的抽屉内容只有命令、检测状态和文件夹列表，抽成一份避免重复。
+type projectTool struct {
+	id          string
+	label       string
+	placeholder string
+	command     *string
+	folders     *[]string
+	status      string
+	checking    bool
+	failed      bool
+	ready       bool
+	onCommand   func()
+	onRetry     func()
+	onPick      func()
+	onRemove    func(int)
+	emptyHint   string
+}
+
+func (a *app) vscodeTool() projectTool {
+	return projectTool{
+		id: "vscode", label: "VS Code", placeholder: "code",
+		command:   &a.settings.LauncherVSCodeCommand,
+		folders:   &a.settings.LauncherVSCodeFolders,
+		status:    a.vscodeStatusText(),
+		checking:  a.vscode.checking,
+		failed:    a.vscode.err != "",
+		ready:     a.vscodeIsReady(),
+		onCommand: a.afterToolCommandChange,
+		onRetry:   a.detectVSCodeCommand,
+		onPick:    a.pickVSCodeFolders,
+		onRemove:  func(i int) { a.removeProjectFolder(&a.settings.LauncherVSCodeFolders, i, a.afterVSCodeFoldersChange) },
+		emptyHint: "还没有项目文件夹。点击“添加文件夹”选择一个或多个目录。",
+	}
+}
+
+func (a *app) forkTool() projectTool {
+	return projectTool{
+		id: "fork", label: "Fork", placeholder: "fork",
+		command:   &a.settings.LauncherForkCommand,
+		folders:   &a.settings.LauncherForkFolders,
+		status:    a.forkStatusText(),
+		checking:  a.fork.checking,
+		failed:    a.fork.err != "",
+		ready:     a.forkIsReady(),
+		onCommand: a.afterToolCommandChange,
+		onRetry:   a.detectForkCommand,
+		onPick:    a.pickForkFolders,
+		onRemove:  func(i int) { a.removeProjectFolder(&a.settings.LauncherForkFolders, i, a.afterForkFoldersChange) },
+		emptyHint: "还没有项目文件夹。点击“添加文件夹”选择存放 Git 仓库的目录。",
+	}
+}
+
+func (a *app) vscodeCommandRow(c *ui.Context) { a.projectCommandRow(c, a.vscodeTool()) }
+
+func (a *app) vscodeFolderSection(c *ui.Context) { a.projectFolderSection(c, a.vscodeTool()) }
+
+func (a *app) forkCommandRow(c *ui.Context) { a.projectCommandRow(c, a.forkTool()) }
+
+func (a *app) forkFolderSection(c *ui.Context) { a.projectFolderSection(c, a.forkTool()) }
+
+func (a *app) projectCommandRow(c *ui.Context, t projectTool) {
+	ui.Column(c).Gap(7).Children(func() {
+		ui.Text(c, "触发词").FontSize(11).Bold().TextColor(colTextSoft)
+		in := ui.TextInput(c.Key(t.id+"-command"), t.command).
+			Placeholder(t.placeholder).Label(t.label + " 触发词").Height(40).WidthPercent(100)
+		if in.Changed() {
+			t.onCommand()
 		}
 	})
 
 	ui.Row(c).Gap(9).AlignItems(ui.Center).Children(func() {
 		name, color := "check", colSuccess
 		switch {
-		case a.vscode.checking:
+		case t.checking:
 			name, color = "refresh", colTextMuted
-		case a.vscode.err != "":
+		case t.failed:
 			name, color = "alert", colDanger
-		case !a.vscodeIsReady():
+		case !t.ready:
 			name, color = "alert", colTextMuted
 		}
 		ui.Icon(c, icon(name)).FontSize(14).TextColor(color)
-		ui.Text(c, a.vscodeStatusText()).Grow(1).MinWidth(0).FontSize(12).
+		ui.Text(c, t.status).Grow(1).MinWidth(0).FontSize(12).
 			TextColor(color).MaxLines(2)
-		if secondaryBtn(c, "重新检测").Clicked() {
-			a.detectVSCodeCommand()
+		if secondaryBtn(c, "重新检测").Label(t.label + " 重新检测").Clicked() {
+			t.onRetry()
 		}
 	})
-	ui.Text(c, "示例：输入 "+a.vscodeCommand()+" + 空格，再输入项目名；回车用 VSCode 打开。").
-		FontSize(11).TextColor(colTextMuted)
-	ui.Text(c, "自动配置的快捷命令只供启动器使用，不会修改系统 PATH。").
+	ui.Text(c, "示例：输入 "+toolCommand(t)+" + 空格，再输入项目名；回车用 "+t.label+" 打开。").
 		FontSize(11).TextColor(colTextMuted)
 }
 
-func (a *app) vscodeFolderSection(c *ui.Context) {
+// toolCommand 读取配置里的命令，留空时用工具自己的默认值。
+func toolCommand(t projectTool) string {
+	if t.command == nil {
+		return t.placeholder
+	}
+	if cmd := strings.TrimSpace(*t.command); cmd != "" {
+		return cmd
+	}
+	return t.placeholder
+}
+
+func (a *app) projectFolderSection(c *ui.Context, t projectTool) {
 	ui.Row(c).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).Gap(3).Children(func() {
 			ui.Text(c, "项目文件夹").FontSize(11).Bold().TextColor(colTextSoft)
-			ui.Text(c, "只扫描每个文件夹的下一级目录，可添加多个。").FontSize(11).TextColor(colTextMuted)
+			ui.Text(c, "只扫描每个文件夹的下一级目录，可添加多个。").
+				FontSize(11).TextColor(colTextMuted)
 		})
-		if secondaryBtn(c, "添加文件夹").Clicked() {
-			a.pickVSCodeFolders()
+		if secondaryBtn(c, "添加文件夹").Label(t.label + " 添加文件夹").Clicked() {
+			t.onPick()
 		}
 	})
 
-	folders := a.settings.LauncherVSCodeFolders
+	folders := *t.folders
 	if len(folders) == 0 {
 		ui.Row(c).Padding(12).Radius(10).Background(ui.RGBA(255, 255, 255, 0.035)).
 			Border(1, colLine).Children(func() {
-			ui.Text(c, "还没有项目文件夹。点击“添加文件夹”选择一个或多个目录。").
-				FontSize(12).TextColor(colTextMuted)
+			ui.Text(c, t.emptyHint).FontSize(12).TextColor(colTextMuted)
 		})
 		return
 	}
 	ui.Column(c).Gap(6).Children(func() {
 		for i, folder := range folders {
 			i, folder := i, folder
-			row := ui.Row(c.Key("vscode-folder-"+folder)).Gap(10).AlignItems(ui.Center).
+			row := ui.Row(c.Key(t.id+"-folder-"+folder)).Gap(10).AlignItems(ui.Center).
 				Padding(10, 12).Radius(10).Background(ui.RGBA(255, 255, 255, 0.035)).
 				Border(1, colLine)
 			row.Children(func() {
@@ -758,32 +891,35 @@ func (a *app) vscodeFolderSection(c *ui.Context) {
 				ui.Text(c, folder).Grow(1).MinWidth(0).FontSize(12).
 					TextColor(colTextSoft).MaxLines(1)
 				if ghostBtn(c, "移除").Label("移除 " + folder).MinHeight(26).Clicked() {
-					a.removeVSCodeFolder(i)
+					t.onRemove(i)
 				}
 			})
 		}
 	})
 }
 
-func (a *app) afterVSCodeToggle() {
+// afterToolCommandChange 保存触发词改动。触发词只影响「命令 + 空格」的
+// 输入匹配，不重新探测，已检测到的命令保持不变。
+func (a *app) afterToolCommandChange() {
 	if err := a.persist(); err != nil {
 		a.toast("保存失败：" + err.Error())
 		return
 	}
-	if a.settings.LauncherVSCodeEnabled {
-		a.detectVSCodeCommand()
-		a.toast("VSCode 快速打开已开启")
-	} else {
-		a.vscode = vscodeState{}
-		a.refreshMain()
-		a.toast("VSCode 快速打开已关闭")
-	}
 	if a.launcher != nil {
-		a.launcher.vscodeSettingsChanged()
+		a.launcher.vscodeChanged()
 	}
 }
 
 func (a *app) pickVSCodeFolders() {
+	a.pickProjectFolders(&a.settings.LauncherVSCodeFolders, a.afterVSCodeFoldersChange)
+}
+
+func (a *app) pickForkFolders() {
+	a.pickProjectFolders(&a.settings.LauncherForkFolders, a.afterForkFoldersChange)
+}
+
+// pickProjectFolders 弹出原生目录多选，选完交给 addProjectFolders。
+func (a *app) pickProjectFolders(target *[]string, onChanged func()) {
 	if a.win == nil {
 		return
 	}
@@ -803,14 +939,14 @@ func (a *app) pickVSCodeFolders() {
 			if a.quitting {
 				return
 			}
-			a.addVSCodeFolders(paths)
+			a.addProjectFolders(target, paths, onChanged)
 		})
 	}()
 }
 
-func (a *app) addVSCodeFolders(paths []string) {
-	seen := make(map[string]struct{}, len(a.settings.LauncherVSCodeFolders))
-	for _, f := range normalizeProjectFolders(a.settings.LauncherVSCodeFolders) {
+func (a *app) addProjectFolders(target *[]string, paths []string, onChanged func()) {
+	seen := make(map[string]struct{}, len(*target))
+	for _, f := range normalizeProjectFolders(*target) {
 		seen[strings.ToLower(f)] = struct{}{}
 	}
 	changed := false
@@ -825,60 +961,77 @@ func (a *app) addVSCodeFolders(paths []string) {
 			continue
 		}
 		seen[key] = struct{}{}
-		a.settings.LauncherVSCodeFolders = append(a.settings.LauncherVSCodeFolders, p)
+		*target = append(*target, p)
 		changed = true
 	}
 	if !changed {
 		return
 	}
-	if err := a.persist(); err != nil {
-		a.toast("保存失败：" + err.Error())
-		return
-	}
-	if a.launcher != nil {
-		a.launcher.vscodeSettingsChanged()
-	}
-	a.toast("项目文件夹已更新")
+	onChanged()
 }
 
-func (a *app) removeVSCodeFolder(i int) {
-	folders := a.settings.LauncherVSCodeFolders
+func (a *app) removeProjectFolder(target *[]string, i int, onChanged func()) {
+	folders := *target
 	if i < 0 || i >= len(folders) {
 		return
 	}
 	next := make([]string, 0, len(folders)-1)
 	next = append(next, folders[:i]...)
 	next = append(next, folders[i+1:]...)
-	a.settings.LauncherVSCodeFolders = next
+	*target = next
+	onChanged()
+}
+
+// afterProjectFoldersChange 保存文件夹改动并让浮窗重扫项目。
+func (a *app) afterProjectFoldersChange() {
 	if err := a.persist(); err != nil {
 		a.toast("保存失败：" + err.Error())
 		return
 	}
 	if a.launcher != nil {
-		a.launcher.vscodeSettingsChanged()
+		a.launcher.projectSettingsChanged()
+	}
+	a.toast("项目文件夹已更新")
+}
+
+func (a *app) afterVSCodeFoldersChange() { a.afterProjectFoldersChange() }
+
+func (a *app) afterForkFoldersChange() { a.afterProjectFoldersChange() }
+
+func (a *app) afterVSCodeToggle() {
+	if err := a.persist(); err != nil {
+		a.toast("保存失败：" + err.Error())
+		return
+	}
+	if a.settings.LauncherVSCodeEnabled {
+		a.detectVSCodeCommand()
+		a.toast("VS Code 快速打开已开启")
+	} else {
+		a.vscode = vscodeState{}
+		a.refreshMain()
+		a.toast("VS Code 快速打开已关闭")
+	}
+	if a.launcher != nil {
+		a.launcher.projectSettingsChanged()
 	}
 }
 
-func (a *app) launcherIndexCard(c *ui.Context) {
-	ui.Column(c).Padding(20).Radius(17).Background(colCard).Border(1, colLine).
-		Shadow(0, 2, 12, 0, shadowCard).Children(func() {
-		ui.Row(c).Gap(13).AlignItems(ui.Center).Children(func() {
-			iconTile(c, "provider", 38, 11, colBgSoft, colTextSoft)
-			ui.Column(c).Grow(1).Gap(3).Children(func() {
-				ui.Text(c, "索引状态").FontSize(16).Bold()
-				ui.Text(c, a.launcherAppStatus()).FontSize(12).TextColor(colTextSoft)
-				ui.Text(c, a.launcherFileStatus()).FontSize(12).TextColor(colTextMuted)
-			})
-			if secondaryBtn(c, "重建索引").Clicked() {
-				if a.launcher == nil {
-					a.toast("首次唤起时会自动建立索引")
-					return
-				}
-				a.launcher.rebuildCaches()
-				a.toast("正在重建索引…")
-			}
-		})
-	})
+func (a *app) afterForkToggle() {
+	if err := a.persist(); err != nil {
+		a.toast("保存失败：" + err.Error())
+		return
+	}
+	if a.settings.LauncherForkEnabled {
+		a.detectForkCommand()
+		a.toast("Fork 快速打开已开启")
+	} else {
+		a.fork = forkState{}
+		a.refreshMain()
+		a.toast("Fork 快速打开已关闭")
+	}
+	if a.launcher != nil {
+		a.launcher.projectSettingsChanged()
+	}
 }
 
 func (a *app) launcherHotkeyStatus() string {

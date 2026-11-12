@@ -75,6 +75,9 @@ func (a *app) ready() {
 	if a.settings.LauncherEnabled && a.settings.LauncherVSCodeEnabled {
 		a.detectVSCodeCommand()
 	}
+	if a.settings.LauncherEnabled && a.settings.LauncherForkEnabled {
+		a.detectForkCommand()
+	}
 	a.win.Show()
 }
 

@@ -10,7 +10,7 @@ import (
 
 // configSchemaVersion 是落盘配置的版本。迁移必须按版本逐级判断，
 // 不能只看“小于当前版本”，否则升级到 v3 会把 v2 用户的搜索源选择覆盖掉。
-const configSchemaVersion = 3
+const configSchemaVersion = 4
 
 // HotkeySettings 是各插件绑定的全局快捷键（accelerator 字符串）。
 type HotkeySettings struct {
@@ -31,9 +31,14 @@ type Settings struct {
 	LauncherSearchFiles bool           `json:"launcherSearchFiles"`
 	// LauncherVSCode 系列字段属于启动器的自定义命令。默认关闭，
 	// 命令留空时按 code 处理，项目文件夹可以配置多个。
-	LauncherVSCodeEnabled  bool     `json:"launcherVSCodeEnabled"`
-	LauncherVSCodeCommand  string   `json:"launcherVSCodeCommand"`
-	LauncherVSCodeFolders  []string `json:"launcherVSCodeFolders"`
+	LauncherVSCodeEnabled bool     `json:"launcherVSCodeEnabled"`
+	LauncherVSCodeCommand string   `json:"launcherVSCodeCommand"`
+	LauncherVSCodeFolders []string `json:"launcherVSCodeFolders"`
+	// LauncherFork 是 Fork（Git 客户端）的同款配置，项目文件夹独立一份，
+	// 只列出 Git 仓库。命令留空时按 fork 处理。
+	LauncherForkEnabled bool     `json:"launcherForkEnabled"`
+	LauncherForkCommand string   `json:"launcherForkCommand"`
+	LauncherForkFolders []string `json:"launcherForkFolders"`
 	TargetLang             string   `json:"targetLang"`
 	LaunchAtLogin          bool     `json:"launchAtLogin"`
 	HasCompletedOnboarding bool     `json:"hasCompletedOnboarding"`
@@ -87,6 +92,9 @@ func defaultSettings() Settings {
 		LauncherVSCodeEnabled: false,
 		LauncherVSCodeCommand: "code",
 		LauncherVSCodeFolders: nil,
+		LauncherForkEnabled:   false,
+		LauncherForkCommand:   "fork",
+		LauncherForkFolders:   nil,
 		TargetLang:            "auto",
 		LaunchAtLogin:         false,
 	}

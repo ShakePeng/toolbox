@@ -52,13 +52,13 @@ func TestManualSaveButtonsRemoved(t *testing.T) {
 	a := newTestApp()
 	tt := ui.NewTester(a.view, 980, 680)
 
-	if err := tt.Click("翻译"); err != nil {
+	if err := tt.Click("划词翻译"); err != nil {
 		t.Fatal(err)
 	}
 	if tt.HasText("保存翻译设置") {
 		t.Error("翻译页不应再显示“保存翻译设置”按钮")
 	}
-	if err := tt.Click("截图"); err != nil {
+	if err := tt.Click("截图标注"); err != nil {
 		t.Fatal(err)
 	}
 	if tt.HasText("保存截图设置") {
@@ -71,7 +71,7 @@ func TestLanguageSelectionPersists(t *testing.T) {
 	a.configPath = filepath.Join(t.TempDir(), "config.json")
 	tt := ui.NewTester(a.view, 980, 680)
 
-	if err := tt.Click("翻译"); err != nil {
+	if err := tt.Click("划词翻译"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.Click("自动判断"); err != nil {
@@ -129,7 +129,7 @@ func TestProviderModal(t *testing.T) {
 	a := newTestApp()
 	tt := ui.NewTester(a.view, 980, 680)
 
-	if err := tt.Click("翻译"); err != nil {
+	if err := tt.Click("划词翻译"); err != nil {
 		t.Fatalf("点击“翻译”导航失败：%v", err)
 	}
 	if !tt.HasText("百度翻译") {
@@ -324,6 +324,30 @@ func TestMigrateVSCodeFromV2(t *testing.T) {
 	}
 	if cfg.SchemaVersion != configSchemaVersion || cfg.Settings.SchemaVersion != configSchemaVersion {
 		t.Errorf("迁移后版本应为 v%d，实际 %d / %d", configSchemaVersion, cfg.SchemaVersion, cfg.Settings.SchemaVersion)
+	}
+}
+
+// v3 升级到 v4 只补 Fork 命令默认值，开关保持关闭，不改变用户已有的 VSCode 配置。
+func TestMigrateForkFromV3(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.SchemaVersion = 3
+	cfg.Settings.SchemaVersion = 3
+	cfg.Settings.LauncherVSCodeEnabled = true
+	cfg.Settings.LauncherVSCodeCommand = "cursor"
+	cfg.Settings.LauncherForkEnabled = false
+	cfg.Settings.LauncherForkCommand = ""
+
+	migrateConfig(&cfg)
+
+	if cfg.Settings.LauncherForkCommand != "fork" {
+		t.Errorf("v3 迁移后 Fork 命令应为 fork，实际 %q", cfg.Settings.LauncherForkCommand)
+	}
+	if cfg.Settings.LauncherForkEnabled {
+		t.Error("v3 迁移不应开启 Fork 快速打开")
+	}
+	if !cfg.Settings.LauncherVSCodeEnabled || cfg.Settings.LauncherVSCodeCommand != "cursor" {
+		t.Errorf("v3 迁移不应改动 VSCode 配置：enabled=%v command=%q",
+			cfg.Settings.LauncherVSCodeEnabled, cfg.Settings.LauncherVSCodeCommand)
 	}
 }
 

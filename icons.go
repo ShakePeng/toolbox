@@ -11,6 +11,26 @@ import (
 //go:embed resources/icon.png
 var iconPNG []byte
 
+// VS Code 品牌图标取自其应用内资源，保留原始蓝色以区别于通用代码图标。
+//
+//go:embed resources/vscode.svg
+var vscodeSVG []byte
+
+var vscodeIcon = ui.MustParseSVG(vscodeSVG)
+
+// Fork 图标取自其应用包，保留原始配色。
+//
+//go:embed resources/fork.png
+var forkPNG []byte
+
+var forkIcon = func() ui.ImageSource {
+	bmp, err := ui.DecodeBitmap(forkPNG)
+	if err != nil {
+		return nil
+	}
+	return bmp
+}()
+
 // iconSVG 是以 currentColor 描边的轻量线性图标，风格对齐原 UiIcon。
 var iconSVG = map[string]string{
 	"home":         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>`,

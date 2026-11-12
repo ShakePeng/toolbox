@@ -23,7 +23,11 @@ type vscodeProbe struct {
 	Err      error
 }
 
-// vscodeCommand 返回用户配置的命令；留空时退回 code。
+// defaultVSCodeCommand 是实际用于检测和打开项目的命令。
+// 设置页里可编辑的只是触发词，不参与探测。
+const defaultVSCodeCommand = "code"
+
+// vscodeCommand 返回用户配置的触发词；留空时退回 code。
 func (a *app) vscodeCommand() string {
 	if a == nil {
 		return "code"
@@ -53,7 +57,7 @@ func probeVSCodeCommand(command string) vscodeProbe {
 
 	base := strings.TrimSuffix(strings.ToLower(filepath.Base(command)), filepath.Ext(command))
 	if base != "code" && base != "code-insiders" {
-		return vscodeProbe{Err: fmt.Errorf("未找到命令 %q，请检查命令名称，或在 VSCode 中安装 code 命令", command)}
+		return vscodeProbe{Err: fmt.Errorf("未找到命令 %q，请检查命令名称是否正确", command)}
 	}
 
 	candidate, err := findVSCodeCLI(base)
@@ -64,10 +68,10 @@ func probeVSCodeCommand(command string) vscodeProbe {
 	if installErr != nil || shim == "" {
 		return vscodeProbe{
 			Resolved: candidate,
-			Status:   "未在 PATH 中找到命令，已直接使用 VSCode 安装路径：" + candidate,
+			Status:   "已直接使用 VSCode 安装路径：" + candidate,
 		}
 	}
-	return vscodeProbe{Resolved: shim, Status: "未在 PATH 中找到命令，已自动配置：" + shim}
+	return vscodeProbe{Resolved: shim, Status: "已自动配置快捷命令：" + shim}
 }
 
 func looksLikeVSCodePath(command string) bool {
@@ -128,6 +132,9 @@ func findVSCodeCLI(base string) (string, error) {
 			return path, nil
 		}
 	}
+	if runtime.GOOS == "darwin" {
+		return "", errors.New("未检测到 VSCode，请确认已安装 VSCode 应用")
+	}
 	return "", errors.New("未检测到 VSCode 安装，请先安装 VSCode，或把命令改成实际的 VSCode 可执行文件")
 }
 
@@ -181,7 +188,7 @@ func installVSCodeShim(base, cli string) (string, error) {
 func (a *app) openFolderInVSCode(folder string) error {
 	command := a.vscode.effective
 	if command == "" {
-		probe := probeVSCodeCommand(a.vscodeCommand())
+		probe := probeVSCodeCommand(defaultVSCodeCommand)
 		if probe.Err != nil {
 			return probe.Err
 		}
@@ -229,7 +236,7 @@ func (a *app) detectVSCodeCommand() {
 		}
 		return
 	}
-	command := a.vscodeCommand()
+	command := defaultVSCodeCommand
 	a.vscode.gen++
 	gen := a.vscode.gen
 	a.vscode.checking = true

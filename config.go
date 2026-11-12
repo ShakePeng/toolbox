@@ -58,6 +58,12 @@ func migrateConfig(cfg *Config) {
 			cfg.Settings.LauncherVSCodeCommand = "code"
 		}
 	}
+	// v3 没有 Fork 配置；只补命令默认值，开关保持关闭，不覆盖用户后续的修改。
+	if cfg.SchemaVersion < 4 {
+		if strings.TrimSpace(cfg.Settings.LauncherForkCommand) == "" {
+			cfg.Settings.LauncherForkCommand = "fork"
+		}
+	}
 	cfg.SchemaVersion = configSchemaVersion
 	cfg.Settings.SchemaVersion = configSchemaVersion
 
