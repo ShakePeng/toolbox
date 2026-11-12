@@ -1,0 +1,35 @@
+go.mod
+  s_625b583375de0a::t_d29aff665592de 10
+launcher_app_names.go
+  s_625b583375de0a::t_0b12a890de80d0 1-84
+launcher_app_names_test.go
+  s_625b583375de0a::t_4238a903e4a0d6 1-144
+launcher_apps.go
+  s_625b583375de0a::t_658782eec2b592 61-63,65-66,77-101,104,106
+launcher_spotlight_darwin.go
+  s_625b583375de0a::t_93c5e48fe4ee04 1-60
+launcher_spotlight_darwin_test.go
+  s_625b583375de0a::t_e2939f1e694f13 1-21
+launcher_spotlight_other.go
+  s_625b583375de0a::t_12ca0076e01026 1-6
+mygo.json
+  s_625b583375de0a::t_45b31d597930a8 4
+resources/vscode.svg
+  s_625b583375de0a::t_4ab36d44574299 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "70eb7791b4c7d363f29cee46ae842055aa534227",
+  "prompts": {},
+  "sessions": {
+    "s_625b583375de0a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69605d95-26b4-4f1c-a4ed-d3458ca58ab1",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
