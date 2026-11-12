@@ -1,0 +1,51 @@
+CHANGELOG.md
+  s_e21e69861d01d5::t_dcdf72e468ccc6 7-8
+CLAUDE.md
+  s_e21e69861d01d5::t_348ec8b2ce85fd 100,157-165,187-188,208
+app.go
+  s_e21e69861d01d5::t_a2f1ece811fede 63-64
+config.go
+  s_e21e69861d01d5::t_769e2f582ef765 67-73
+icons.go
+  s_e21e69861d01d5::t_b0ae3dee10156f 21-33
+launcher.go
+  s_e21e69861d01d5::t_3813625c0e46f1 67-68,87-88,239-243,275-312,317-318,320-322,367-380,462-479,496-497,509-510,512-513,630-634,636,692-695,737-738,838-845,857-867,912-961,986-987,989-990,995-1008,1015-1016,1080-1096,1118-1121,1132-1134,1137,1214-1293,1310-1313,1396-1397,1418-1435
+launcher_projects.go
+  s_e21e69861d01d5::t_59427248fb2bb8 51-56,389-397
+launcher_search.go
+  s_e21e69861d01d5::t_589ed85e85e376 21-22,33-34,60-61
+launcher_test.go
+  s_e21e69861d01d5::t_8b702afd8cbf59 383-412
+main.go
+  s_e21e69861d01d5::t_ca66b018879f0f 81-83
+model.go
+  s_e21e69861d01d5::t_47c78f2cb54699 13,42-60,101-120
+trae.go
+  s_e21e69861d01d5::t_fe806bd9aaad75 1-240
+trae_test.go
+  s_e21e69861d01d5::t_00b1d1513aef49 1-105
+websearch.go
+  s_e21e69861d01d5::t_e9ff4f1b330ca0 1-211
+websearch_run_other.go
+  s_e21e69861d01d5::t_2ec5164da9516c 1-17
+websearch_run_windows.go
+  s_e21e69861d01d5::t_079aefa1f335f6 1-16
+websearch_test.go
+  s_e21e69861d01d5::t_f623c1b91fd2fa 1-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "01ab7a256bd8af8e00ec704eea9439c3511b14c7",
+  "prompts": {},
+  "sessions": {
+    "s_e21e69861d01d5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e11fb785-b42b-4ab8-84e6-c93fbc09bac0",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
