@@ -364,10 +364,12 @@ func (a *app) overviewSection(c *ui.Context) {
 		ui.Row(c).Gap(14).AlignItems(ui.Stretch).Children(func() {
 			for j := i; j < end; j++ {
 				card := cards[j]
-				a.featureCard(c, card.iconName, card.title, card.desc, card.on, card.kind).Grow(1)
+				// Basis(0) 让同一行按 Grow 权重均分；否则 flex-basis 取内容宽度，
+				// 描述文案长短不同的卡片宽度会不一致，和下一行的卡片也对不齐。
+				a.featureCard(c, card.iconName, card.title, card.desc, card.on, card.kind).Basis(0).Grow(1)
 			}
 			for k := end - i; k < cols; k++ {
-				ui.Box(c).Grow(1)
+				ui.Box(c).Basis(0).Grow(1)
 			}
 		})
 	}
@@ -387,7 +389,7 @@ func (a *app) featureCard(c *ui.Context, iconName, title, desc string, on *bool,
 	return ui.Row(c).MinWidth(0).Gap(14).AlignItems(ui.Center).Padding(18).Radius(17).
 		Background(colCard).Border(1, bc).Shadow(0, 2, 12, 0, shadowCard).Children(func() {
 		iconTile(c, iconName, 42, 12, ibg, ifg)
-		ui.Column(c).Grow(1).Gap(4).Children(func() {
+		ui.Column(c).Grow(1).MinWidth(0).Gap(4).Children(func() {
 			ui.Row(c).Gap(8).AlignItems(ui.Baseline).Children(func() {
 				ui.Text(c, title).FontSize(15).Bold()
 				ui.Text(c, status).FontSize(11).TextColor(colTextMuted)
@@ -450,10 +452,10 @@ func (a *app) providerGrid(c *ui.Context) {
 		end := min(i+cols, len(a.providers))
 		ui.Row(c).Gap(14).AlignItems(ui.Stretch).Children(func() {
 			for j := i; j < end; j++ {
-				a.providerCard(c, j).Grow(1)
+				a.providerCard(c, j).Basis(0).Grow(1)
 			}
 			for k := end - i; k < cols; k++ {
-				ui.Box(c).Grow(1)
+				ui.Box(c).Basis(0).Grow(1)
 			}
 		})
 	}
