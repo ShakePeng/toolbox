@@ -1,0 +1,23 @@
+ai_suppliers.go
+  s_e21e69861d01d5::t_5db86f62105297 1-488
+ai_suppliers_test.go
+  s_e21e69861d01d5::t_ec4f6d7a5c986c 1-209
+app.go
+  s_e21e69861d01d5::t_be7c26d1778088 35,180,323-324,769
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "99b2384893e7f2b3ab94b9a3ab1ba6eb58c4b81b",
+  "prompts": {},
+  "sessions": {
+    "s_e21e69861d01d5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e11fb785-b42b-4ab8-84e6-c93fbc09bac0",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
