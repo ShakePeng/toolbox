@@ -1,0 +1,21 @@
+fork.go
+  s_e21e69861d01d5::t_b7325802bf7be1 36-37,39
+vscode.go
+  s_e21e69861d01d5::t_d4583e13455941 35-36,38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "94d1dd41f6985d16b1a8607e26e135dcff121ff8",
+  "prompts": {},
+  "sessions": {
+    "s_e21e69861d01d5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e11fb785-b42b-4ab8-84e6-c93fbc09bac0",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
