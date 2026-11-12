@@ -1,0 +1,19 @@
+launcher_fork_test.go
+  s_5a84c6b4a0ff2c::t_684701e7b86c76 85-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "bbe9623c9e9e1d8c9d4f20312403cfa550cc8720",
+  "prompts": {},
+  "sessions": {
+    "s_5a84c6b4a0ff2c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b7de494-ab59-42b0-8c12-1f8480c4b35c",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
