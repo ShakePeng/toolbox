@@ -60,6 +60,8 @@ type app struct {
 	vscode vscodeState
 	// fork 保存 Fork 的探测结果，没有 CLI 时回退应用本体。
 	fork forkState
+	// trae 保存 Trae 的命令探测结果。
+	trae traeState
 }
 
 // refreshMain 让主窗口重绘。后台加载完成后用它同步设置页的状态。

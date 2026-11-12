@@ -18,6 +18,8 @@ const (
 	launcherKindProject
 	// launcherKindAction 是命令触发的操作行（如重建索引），不对应文件或应用。
 	launcherKindAction
+	// launcherKindSearch 是网页搜索的入口行。
+	launcherKindSearch
 )
 
 // launcherAction 是操作行要执行的动作。
@@ -28,6 +30,8 @@ const (
 	launcherActionReindex
 	// launcherActionProject 进入某个项目源的项目模式。
 	launcherActionProject
+	// launcherActionWebSearch 进入某个搜索引擎的搜索模式。
+	launcherActionWebSearch
 )
 
 // launcherItem 是浮窗列表里的一行。
@@ -53,6 +57,8 @@ func (k launcherKind) label() string {
 		return "项目"
 	case launcherKindAction:
 		return "操作"
+	case launcherKindSearch:
+		return "搜索"
 	default:
 		return "文件"
 	}

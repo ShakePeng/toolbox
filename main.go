@@ -78,6 +78,9 @@ func (a *app) ready() {
 	if a.settings.LauncherEnabled && a.settings.LauncherForkEnabled {
 		a.detectForkCommand()
 	}
+	if a.settings.LauncherEnabled && a.settings.LauncherTraeEnabled {
+		a.detectTraeCommand()
+	}
 	a.win.Show()
 }
 

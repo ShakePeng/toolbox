@@ -64,6 +64,13 @@ func migrateConfig(cfg *Config) {
 			cfg.Settings.LauncherForkCommand = "fork"
 		}
 	}
+	// v4 没有 Trae 配置；同样只补命令默认值，开关保持关闭。
+	if cfg.SchemaVersion < 5 {
+		if strings.TrimSpace(cfg.Settings.LauncherTraeCommand) == "" {
+			cfg.Settings.LauncherTraeCommand = "trae"
+		}
+	}
+	// v5 没有网页搜索配置；新字段零值就是「未启用」，不需要补数据。
 	cfg.SchemaVersion = configSchemaVersion
 	cfg.Settings.SchemaVersion = configSchemaVersion
 

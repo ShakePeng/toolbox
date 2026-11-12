@@ -380,6 +380,36 @@ func TestLauncherProjectModeEmptyHint(t *testing.T) {
 	}
 }
 
+// 启动项开关打开但检测失败时，折叠状态也要能看到「未生效」。
+func TestLauncherSourceBadge(t *testing.T) {
+	a := newTestApp()
+	a.settings.LauncherEnabled = true
+	a.settings.LauncherForkEnabled = true
+	a.section = "launcher"
+	a.fork = forkState{checked: true, err: "未检测到 Fork，请确认已安装 Fork 应用"}
+
+	tt := ui.NewTester(a.view, 1080, 900)
+	tt.Frame()
+	if !tt.HasText("未生效") {
+		t.Fatalf("Fork 检测失败时卡片应显示未生效，实际文本：%q", tt.Texts())
+	}
+
+	a.fork = forkState{checked: true, effective: "/usr/local/bin/fork"}
+	tt.Frame()
+	if tt.HasText("未生效") {
+		t.Errorf("检测成功后不应显示未生效，实际文本：%q", tt.Texts())
+	}
+	if !tt.HasText("未配置文件夹") {
+		t.Errorf("检测成功但没有项目文件夹时应提示未配置，实际文本：%q", tt.Texts())
+	}
+
+	a.settings.LauncherForkFolders = []string{"/projects"}
+	tt.Frame()
+	if tt.HasText("未配置文件夹") || tt.HasText("未生效") {
+		t.Errorf("检测成功且已配置文件夹后不应显示提示，实际文本：%q", tt.Texts())
+	}
+}
+
 func TestLauncherVSCodeSettingsVisible(t *testing.T) {
 	a := newTestApp()
 	a.settings.LauncherEnabled = true

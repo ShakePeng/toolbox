@@ -48,6 +48,12 @@ func (a *app) projectSources() []launcherProjectSource {
 			folders: a.settings.LauncherForkFolders, gitOnly: true,
 		})
 	}
+	if a.settings.LauncherTraeEnabled {
+		out = append(out, launcherProjectSource{
+			id: "trae", label: "Trae", prefix: a.traeCommand(),
+			folders: a.settings.LauncherTraeFolders,
+		})
+	}
 	return out
 }
 
@@ -378,6 +384,15 @@ func (s *launcherSession) projectStatusLine() string {
 		case s.app.forkIsReady():
 			parts = append(parts, "命令已就绪")
 		case s.app.fork.err != "":
+			parts = append(parts, "命令不可用")
+		}
+	case "trae":
+		switch {
+		case s.app.trae.checking:
+			parts = append(parts, "检测命令中")
+		case s.app.traeIsReady():
+			parts = append(parts, "命令已就绪")
+		case s.app.trae.err != "":
 			parts = append(parts, "命令不可用")
 		}
 	default:

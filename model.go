@@ -10,7 +10,7 @@ import (
 
 // configSchemaVersion 是落盘配置的版本。迁移必须按版本逐级判断，
 // 不能只看“小于当前版本”，否则升级到 v3 会把 v2 用户的搜索源选择覆盖掉。
-const configSchemaVersion = 4
+const configSchemaVersion = 6
 
 // HotkeySettings 是各插件绑定的全局快捷键（accelerator 字符串）。
 type HotkeySettings struct {
@@ -39,9 +39,25 @@ type Settings struct {
 	LauncherForkEnabled bool     `json:"launcherForkEnabled"`
 	LauncherForkCommand string   `json:"launcherForkCommand"`
 	LauncherForkFolders []string `json:"launcherForkFolders"`
-	TargetLang             string   `json:"targetLang"`
-	LaunchAtLogin          bool     `json:"launchAtLogin"`
-	HasCompletedOnboarding bool     `json:"hasCompletedOnboarding"`
+	// LauncherTrae 是 Trae（AI IDE）的同款配置，命令留空时按 trae 处理。
+	LauncherTraeEnabled bool     `json:"launcherTraeEnabled"`
+	LauncherTraeCommand string   `json:"launcherTraeCommand"`
+	LauncherTraeFolders []string `json:"launcherTraeFolders"`
+	// LauncherWebSearch 是启动器的网页搜索源。每个引擎配置触发词和含 %s
+	// 的搜索地址，可以添加多个；默认关闭。
+	LauncherWebSearchEnabled bool                   `json:"launcherWebSearchEnabled"`
+	LauncherWebSearchEngines []LauncherSearchEngine `json:"launcherWebSearchEngines"`
+	TargetLang               string                 `json:"targetLang"`
+	LaunchAtLogin            bool                   `json:"launchAtLogin"`
+	HasCompletedOnboarding   bool                   `json:"hasCompletedOnboarding"`
+}
+
+// LauncherSearchEngine 是一个网页搜索源。URL 用 %s 表示查询词占位符。
+type LauncherSearchEngine struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Command string `json:"command"`
+	URL     string `json:"url"`
 }
 
 // Provider 是一个翻译服务配置，对应原 ProviderConfig / ProviderView。
@@ -82,21 +98,26 @@ func defaultHotkeys() HotkeySettings {
 
 func defaultSettings() Settings {
 	return Settings{
-		SchemaVersion:         configSchemaVersion,
-		Hotkeys:               defaultHotkeys(),
-		TranslationEnabled:    false,
-		ScreenshotEnabled:     false,
-		LauncherEnabled:       false,
-		LauncherSearchApps:    true,
-		LauncherSearchFiles:   true,
-		LauncherVSCodeEnabled: false,
-		LauncherVSCodeCommand: "code",
-		LauncherVSCodeFolders: nil,
-		LauncherForkEnabled:   false,
-		LauncherForkCommand:   "fork",
-		LauncherForkFolders:   nil,
-		TargetLang:            "auto",
-		LaunchAtLogin:         false,
+		SchemaVersion:            configSchemaVersion,
+		Hotkeys:                  defaultHotkeys(),
+		TranslationEnabled:       false,
+		ScreenshotEnabled:        false,
+		LauncherEnabled:          false,
+		LauncherSearchApps:       true,
+		LauncherSearchFiles:      true,
+		LauncherVSCodeEnabled:    false,
+		LauncherVSCodeCommand:    "code",
+		LauncherVSCodeFolders:    nil,
+		LauncherForkEnabled:      false,
+		LauncherForkCommand:      "fork",
+		LauncherForkFolders:      nil,
+		LauncherTraeEnabled:      false,
+		LauncherTraeCommand:      "trae",
+		LauncherTraeFolders:      nil,
+		LauncherWebSearchEnabled: false,
+		LauncherWebSearchEngines: nil,
+		TargetLang:               "auto",
+		LaunchAtLogin:            false,
 	}
 }
 

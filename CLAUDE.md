@@ -97,7 +97,7 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 
 - 配置路径是 `mygo.App.Path(PathUserData)/config.json`，模型在 `model.go`（camelCase，对齐原 Tauri 项目的配置结构），读写与迁移在 `config.go`。
 - `loadConfig`：文件不存在时写默认配置；解析失败回退默认值并记录 `loadErr`，不阻塞启动。
-- `migrateConfig` 负责：补 `schemaVersion`、补默认快捷键、非 macOS 去掉旧版误录的 `Cmd`、补 `TargetLang`、补 OpenAI 默认 Base URL、重算 `Configured`。迁移必须逐级判断：v1→v2 给启动器搜索源补 `true`，v2→v3 给 VSCode 命令补 `code`；不能统一用 `< configSchemaVersion`，否则 v2 用户显式关闭的搜索源会被覆盖。`persist()` 必须写 `configSchemaVersion`。
+- `migrateConfig` 负责：补 `schemaVersion`、补默认快捷键、非 macOS 去掉旧版误录的 `Cmd`、补 `TargetLang`、补 OpenAI 默认 Base URL、重算 `Configured`。迁移必须逐级判断：v1→v2 给启动器搜索源补 `true`，v2→v3 给 VSCode 命令补 `code`，v3→v4 给 Fork 命令补 `fork`，v4→v5 给 Trae 命令补 `trae`；v5→v6 只新增网页搜索字段，零值即可，不需要补数据。不能统一用 `< configSchemaVersion`，否则 v2 用户显式关闭的搜索源会被覆盖。`persist()` 必须写 `configSchemaVersion`。
 - 写入是原子的：先写 `.tmp` 再 `rename`，权限 `0600`。
 - **设置页没有保存按钮**，快捷键、目标语言、开关等改动立刻 `persist()`；测试 `TestManualSaveButtonsRemoved` 会守住这个约定。
 - **翻译凭据目前明文存在 config.json**（原版用系统钥匙串），代码注释已标为后续迁移项。新增字段时不要假设已有加密。
@@ -154,11 +154,15 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 - 文件索引（`launcher_index.go`）只扫桌面、下载、文档（深度 4）和主目录浅层（深度 1），跳过隐藏项、系统/缓存/构建目录、`.app` 等包目录和临时文件；符号链接不跟随。总计上限 5000 条、单根 2500 条。
 - 真实应用图标通过 `Shell.FileIcon` 加载；它内部会切主线程，所以只能在事件路径（`prefetchIcons`）按当前结果最多 8 个、并发 3 加载。`view()` 只查缓存，绝不能在渲染路径调用 `FileIcon`。
 - 搜索评分在 `launcher_search.go`：多词 AND，前缀 > 词首 > 子串；空查询只列应用。搜索源只在主窗口「启动」页切换，切换后立即 `persist()`，并通过 `sourcesChanged()` 同步已打开的浮窗。
-- **VSCode 快速打开**（`vscode.go` / `launcher_projects.go`）：启动器设置页的子开关，默认关闭。配置项是命令（默认 `code`）和多个项目文件夹（原生目录多选）。
-  - 输入「命令 + 空格」进入项目模式；`projectQuery` 不能先 `TrimSpace`，否则触发空格会被吃掉。只扫描每个配置文件夹的下一级子目录，不递归，跳过隐藏项和符号链接，最多 2000 条。
-  - 命令探测在后台串行执行（`vscodeProbeMu`）：先 `exec.LookPath`，找不到再查平台常见安装位置；找到但不在 PATH 时，在 `~/.toolbox/bin`（Windows）或 `~/.local/bin`（Unix）创建仅供启动器使用的 shim/symlink。**不修改系统 PATH**，也不会自动安装 VSCode 本体。
-  - Windows 启动 `.cmd/.bat` 必须经 `cmd.exe /c`，并用 `SysProcAttr{HideWindow:true}` 隐藏控制台（`vscode_run_windows.go`）。
-  - 项目扫描用 `projectGen` 丢弃旧结果；设置变化通过 `vscodeSettingsChanged()` 清空缓存并重扫。探测失败后不要每个按键都重试，`vscode.checked` 负责防重。
+- **网页搜索**（`websearch.go`）：启动器设置页的子开关，默认关闭。可添加多个搜索引擎，每个配置名称、触发词和含 `%s` 占位符的地址模板；设置页提供百度、Google、Bing 预设和自定义入口。
+  - 输入「触发词 + 空格 + 关键词」后结果行是「用某引擎搜索 xxx」，回车用系统默认浏览器打开（macOS `open`、Windows `rundll32`、其他 `xdg-open`）。关键词用 `url.QueryEscape` 编码后填进模板。
+  - 触发词必须全局唯一：不能与内置命令、VS Code / Trae / Fork 触发词或另一个搜索引擎重名，冲突时回退并 toast。
+  - 只有触发词非空且地址包含 `%s` 的引擎才参与匹配，避免打开没有关键词的地址。
+- **VS Code / Trae 快速打开**（`vscode.go`、`trae.go` / `launcher_projects.go`）：启动器设置页的子开关，默认关闭。配置项是触发词（默认 `code` / `trae`）和多个项目文件夹（原生目录多选）。Trae 与 VSCode 同构，探测和启动逻辑各自独立但结构保持一致。
+  - 输入「命令 + 空格」进入项目模式；命令部分可以只输入触发词前缀（至少 2 个字符），命中后提示行回车会补全成完整触发词。`projectQuery` 不能先 `TrimSpace`，否则触发空格会被吃掉。只扫描每个配置文件夹的下一级子目录，不递归，跳过隐藏项和符号链接，最多 2000 条。
+  - 命令探测在后台串行执行（`vscodeProbeMu` / `traeProbeMu`）：先 `exec.LookPath`，找不到再查平台常见安装位置；找到但不在 PATH 时，在 `~/.toolbox/bin`（Windows）或 `~/.local/bin`（Unix）创建仅供启动器使用的 shim/symlink。**不修改系统 PATH**，也不会自动安装编辑器本体。Trae 的 macOS 路径是 `Trae.app/Contents/Resources/app/bin/trae`。
+  - Windows 启动 `.cmd/.bat` 必须经 `cmd.exe /c`，并用 `SysProcAttr{HideWindow:true}` 隐藏控制台（`vscode_run_windows.go`，Trae 复用）。
+  - 项目扫描用 `projectGen` 丢弃旧结果；设置变化通过 `vscodeSettingsChanged()` 清空缓存并重扫。探测失败后不要每个按键都重试，`vscode.checked` / `trae.checked` 负责防重。
 
 ### 快捷键
 
@@ -180,7 +184,8 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 - `render_test.go` 只在 `RENDER=1` 时运行，把各页面（含启动页和启动器浮窗）、不同窗口宽度渲染成 PNG 到系统临时目录的 `toolbox_render`，用于人工核对响应式布局，不参与 CI。
 - 翻译测试用 `httptest`，不访问真实接口；覆盖语言判断、Provider 过滤、百度错误码等。
 - 启动器测试分四层：`launcher_search_test.go` 覆盖评分/过滤/排序；`launcher_index_test.go` 用临时目录验证跳过规则、深度和上限；`launcher_projects_test.go` 覆盖「命令 + 空格」解析、下一级目录扫描和项目过滤；`launcher_test.go` 用 `ui.NewTester` 渲染浮窗，并注入假应用/文件/项目和 `launchApp`/`openPath`/`launchProject`，不启动真实应用。
-- `vscode_test.go` 覆盖未知命令探测、shim 不覆盖已有文件、Windows 安装路径和缺失项目目录；不会真的启动 VSCode。
+- `vscode_test.go` / `trae_test.go` 覆盖未知命令探测、shim 不覆盖已有文件、Windows 安装路径、缺失项目目录和项目模式；不会真的启动编辑器。
+- `websearch_test.go` 覆盖 URL 编码、触发词解析与补全、冲突校验、预设增删和占位符校验；打开浏览器通过注入函数断言，不会真的启动浏览器。
 - Windows 专属代码在单独的 `windows-latest` job 运行，macOS 的测试覆盖不到。
 - 改动共享状态时加 `-race`；改 UI 行为时优先补 Tester 测试。
 
@@ -200,7 +205,7 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 - 自签名证书不能公证，新机器首次打开需在「隐私与安全性」里选择「仍要打开」；证书 2036-11-06 到期。
 - 原生 UI 没有内容自适应高度，翻译浮窗高度是估算值（`fitHeight`），改布局时要同步调整估算。启动器浮窗按 `launcherHeaderHeight` / `launcherRowHeight` 等常量估算高度（67–540），改行内边距或字号时要同步调整这些常量；结果区仍用 `Scroll` 兜底。
 - 快速启动的文件索引只覆盖桌面、下载、文档和主目录浅层，不做全盘搜索、全文搜索或实时监听；索引在首次唤起时建立，应用运行期间不会自动重建（可在「启动」页手动重建）。
-- VSCode 快速打开只扫描每个项目根目录的下一级子目录，不递归，也不按 `.git`/`package.json` 判断是否为项目。自动配置的快捷命令位于用户目录（`~/.toolbox/bin` 或 `~/.local/bin`），仅供启动器使用，不改系统 PATH；不会自动安装 VSCode 本体。
+- VS Code / Trae 快速打开只扫描每个项目根目录的下一级子目录，不递归，也不按 `.git`/`package.json` 判断是否为项目。自动配置的快捷命令位于用户目录（`~/.toolbox/bin` 或 `~/.local/bin`），仅供启动器使用，不改系统 PATH；不会自动安装编辑器本体。
 - macOS 的桌面/文档/下载受 TCC 文件访问限制时，索引会跳过无权限目录；浮窗底部和「启动」页会显示提示。
 
 ## 开发约定

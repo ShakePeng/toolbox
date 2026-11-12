@@ -18,6 +18,19 @@ var vscodeSVG []byte
 
 var vscodeIcon = ui.MustParseSVG(vscodeSVG)
 
+// Trae 图标取自官网 favicon，已去掉黑色底，保留品牌绿色。
+//
+//go:embed resources/trae.png
+var traePNG []byte
+
+var traeIcon = func() ui.ImageSource {
+	bmp, err := ui.DecodeBitmap(traePNG)
+	if err != nil {
+		return nil
+	}
+	return bmp
+}()
+
 // Fork 图标取自其应用包，保留原始配色。
 //
 //go:embed resources/fork.png

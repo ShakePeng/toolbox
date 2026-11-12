@@ -64,6 +64,8 @@ type launcherSession struct {
 	openPath          func(string) error
 	launchProject     func(string) error
 	launchForkProject func(string) error
+	launchTraeProject func(string) error
+	openSearch        func(string) error
 
 	gen       int
 	closed    bool
@@ -82,6 +84,8 @@ func newLauncherSession(a *app) *launcherSession {
 		openPath:          mygo.Shell.OpenPath,
 		launchProject:     a.openFolderInVSCode,
 		launchForkProject: a.openFolderInFork,
+		launchTraeProject: a.openFolderInTrae,
+		openSearch:        openWebSearchURL,
 		icons:             make(map[string]*launcherIcon),
 		iconSem:           make(chan struct{}, launcherIconConcurrency),
 	}
@@ -232,6 +236,11 @@ func (s *launcherSession) rebuildResults() {
 	if s.app == nil {
 		return
 	}
+	// 输入“触发词 + 空格”时进入网页搜索模式。
+	if eng, query, ok := s.webSearchQuery(); ok {
+		s.showWebSearch(eng, query)
+		return
+	}
 	// 输入“命令 + 空格”时切到项目模式：命令部分允许只输入触发词的前缀。
 	if src, query, ok := s.projectQuery(); ok {
 		s.showProjects(src, query)
@@ -263,13 +272,54 @@ func (s *launcherSession) rebuildResults() {
 	}
 }
 
+// showWebSearch 渲染网页搜索入口。只输入触发词时提示补关键词，输入关键词
+// 后行程就是「用某引擎搜索 xxx」，回车打开浏览器。
+func (s *launcherSession) showWebSearch(eng LauncherSearchEngine, query string) {
+	name := webSearchName(eng)
+	item := launcherItem{
+		kind:     launcherKindSearch,
+		project:  eng.ID,
+		title:    "用" + name + "搜索网页",
+		subtitle: "输入关键词后回车，在浏览器中打开",
+	}
+	if query != "" {
+		item.title = "用" + name + "搜索 “" + query + "”"
+		item.path = buildWebSearchURL(eng.URL, query)
+		// 副标题显示未编码的地址，编码后的中文没法读。
+		item.subtitle = strings.ReplaceAll(eng.URL, "%s", query)
+	}
+	s.results = []launcherItem{item}
+	s.selected = 0
+	s.fitHeight()
+	if s.win != nil && s.win.IsVisible() {
+		s.refresh()
+	}
+}
+
+// completeWebSearch 把输入补全成「触发词 + 空格」，并重建输入框让光标
+// 落在末尾，用户直接接着输入关键词即可。
+func (s *launcherSession) completeWebSearch(engineID string) {
+	prefix := s.app.webSearchPrefix(engineID)
+	if prefix == "" {
+		return
+	}
+	s.query = prefix + " "
+	s.inputSeq++
+	s.selected = 0
+	s.notice = ""
+	s.rebuildResults()
+}
+
 // showProjects 渲染某个项目源的项目列表。
 func (s *launcherSession) showProjects(src launcherProjectSource, query string) {
 	s.projectSource = src.id
 	s.ensureProjects(src)
-	if src.id == "fork" {
+	switch src.id {
+	case "fork":
 		s.app.ensureForkProbe()
-	} else {
+	case "trae":
+		s.app.ensureTraeProbe()
+	default:
 		s.app.ensureVSCodeProbe()
 	}
 	s.results = filterLauncherProjects(query, s.projects, launcherMaxResults)
@@ -312,6 +362,20 @@ func (s *launcherSession) launcherActions() []launcherItem {
 			title:    "搜索 " + src.label + " 项目",
 			subtitle: "当前触发词 " + prefix + "，回车进入项目模式",
 			path:     "launcher-action-project-" + src.id,
+		})
+	}
+	for _, eng := range s.app.webSearchEngines() {
+		prefix := strings.TrimSpace(eng.Command)
+		if prefix == "" || !strings.HasPrefix(strings.ToLower(prefix), strings.ToLower(q)) {
+			continue
+		}
+		items = append(items, launcherItem{
+			kind:     launcherKindAction,
+			action:   launcherActionWebSearch,
+			project:  eng.ID,
+			title:    "用" + webSearchName(eng) + "搜索",
+			subtitle: "当前触发词 " + prefix + "，回车进入搜索模式",
+			path:     "launcher-action-websearch-" + eng.ID,
 		})
 	}
 	return items
@@ -395,6 +459,24 @@ func (s *launcherSession) activate(i int) {
 		return
 	}
 	item := s.results[i]
+	if item.kind == launcherKindSearch {
+		if item.path != "" {
+			if s.openSearch == nil {
+				return
+			}
+			if err := s.openSearch(item.path); err != nil {
+				s.notice = "打开浏览器失败：" + err.Error()
+				s.fitHeight()
+				s.refresh()
+				return
+			}
+			s.hide()
+			return
+		}
+		// 只输入了触发词：补全成「触发词 + 空格」，等用户输入关键词。
+		s.completeWebSearch(item.project)
+		return
+	}
 	if item.kind == launcherKindAction {
 		switch item.action {
 		case launcherActionReindex:
@@ -411,6 +493,8 @@ func (s *launcherSession) activate(i int) {
 			s.selected = 0
 			s.notice = ""
 			s.rebuildResults()
+		case launcherActionWebSearch:
+			s.completeWebSearch(item.project)
 		}
 		return
 	}
@@ -422,8 +506,11 @@ func (s *launcherSession) activate(i int) {
 		}
 	case launcherKindProject:
 		launch := s.launchProject
-		if s.projectSource == "fork" {
+		switch s.projectSource {
+		case "fork":
 			launch = s.launchForkProject
+		case "trae":
+			launch = s.launchTraeProject
 		}
 		if launch != nil {
 			err = launch(item.path)
@@ -540,9 +627,13 @@ func (s *launcherSession) emptyHint() (string, string) {
 			return "正在检测 Fork 命令…", "检测完成后即可打开项目。"
 		case src.id == "fork" && s.app.fork.err != "":
 			return "Fork 不可用", s.app.fork.err
-		case src.id != "fork" && settings.LauncherVSCodeEnabled && s.app.vscode.checking:
+		case src.id == "trae" && s.app.trae.checking:
+			return "正在检测 Trae 命令…", "检测完成后即可打开项目。"
+		case src.id == "trae" && s.app.trae.err != "":
+			return "Trae 命令不可用", s.app.trae.err
+		case src.id == "vscode" && settings.LauncherVSCodeEnabled && s.app.vscode.checking:
 			return "正在检测 VS Code 命令…", "检测完成后即可打开项目。"
-		case src.id != "fork" && settings.LauncherVSCodeEnabled && s.app.vscode.err != "":
+		case src.id == "vscode" && settings.LauncherVSCodeEnabled && s.app.vscode.err != "":
 			return "VS Code 命令不可用", s.app.vscode.err
 		case src.gitOnly:
 			return "没有找到 Git 仓库", "换个关键字，或到「启动」页检查文件夹。"
@@ -598,6 +689,10 @@ func (s *launcherSession) resultRow(c *ui.Context, i int) {
 }
 
 func (s *launcherSession) itemIcon(c *ui.Context, item launcherItem) {
+	if item.kind == launcherKindSearch {
+		iconTile(c, "language", 28, 8, colAccentSoft, colAccentStr)
+		return
+	}
 	if item.kind == launcherKindAction {
 		if item.action == launcherActionProject {
 			if toolIcon := launcherToolIcons[item.project]; toolIcon != nil {
@@ -639,7 +734,8 @@ func (s *launcherSession) footer(c *ui.Context) {
 		hint := "↑↓ 选择 · ↵ 打开 · Esc 关闭"
 		if src, _, ok := s.projectQuery(); ok {
 			hint = "↑↓ 选择 · ↵ 用 " + src.label + " 打开 · Esc 关闭"
-		} else if s.selected < len(s.results) && s.results[s.selected].kind == launcherKindAction {
+		} else if s.selected < len(s.results) &&
+			(s.results[s.selected].kind == launcherKindAction || s.results[s.selected].kind == launcherKindSearch) {
 			hint = "↵ 执行 · Esc 关闭"
 		}
 		ui.Text(c, hint).FontSize(11).TextColor(colTextMuted).MaxLines(1)
@@ -739,6 +835,14 @@ func (a *app) launcherSection(c *ui.Context) {
 					ui.Text(c, a.launcherFileStatus()).FontSize(11).TextColor(colTextMuted).MaxLines(2)
 				})
 			})
+			a.launcherSourceItem(c, "websearch", "网页搜索", "配置触发词和搜索地址，输入触发词 + 空格搜索网页", &a.settings.LauncherWebSearchEnabled, func() {
+				if a.settings.LauncherWebSearchEnabled {
+					a.webSearchSettings(c)
+					return
+				}
+				ui.Text(c, "开启后可添加多个搜索引擎，默认提供百度、Google、Bing，也可以自定义。").
+					FontSize(12).TextColor(colTextMuted)
+			})
 			a.launcherSourceItem(c, "vscode", "VS Code 快速打开", "输入触发词 + 空格，快速打开项目", &a.settings.LauncherVSCodeEnabled, func() {
 				if a.settings.LauncherVSCodeEnabled {
 					ui.Column(c).Gap(16).Children(func() {
@@ -748,6 +852,17 @@ func (a *app) launcherSection(c *ui.Context) {
 					return
 				}
 				ui.Text(c, "开启后配置命令和项目文件夹，首次开启会自动检测 VS Code。").
+					FontSize(12).TextColor(colTextMuted)
+			})
+			a.launcherSourceItem(c, "trae", "Trae 快速打开", "输入触发词 + 空格，快速打开项目", &a.settings.LauncherTraeEnabled, func() {
+				if a.settings.LauncherTraeEnabled {
+					ui.Column(c).Gap(16).Children(func() {
+						a.traeCommandRow(c)
+						a.traeFolderSection(c)
+					})
+					return
+				}
+				ui.Text(c, "开启后配置命令和项目文件夹，首次开启会自动检测 Trae。").
 					FontSize(12).TextColor(colTextMuted)
 			})
 			a.launcherSourceItem(c, "fork", "Fork 快速打开", "输入触发词 + 空格，用 Fork 打开 Git 仓库", &a.settings.LauncherForkEnabled, func() {
@@ -794,6 +909,56 @@ func builtinCommandRow(c *ui.Context, commands []string, desc string) {
 var launcherToolIcons = map[string]ui.ImageSource{
 	"vscode": vscodeIcon,
 	"fork":   forkIcon,
+	"trae":   traeIcon,
+}
+
+// launcherSourceBadge 返回启动项卡片标题行上的状态标签。检测中、配置
+// 不可用或缺少项目文件夹时直接显示，用户不用展开详情就能发现没生效。
+// tone 决定颜色：muted 中性、warn 待配置、danger 不可用。
+func (a *app) launcherSourceBadge(id string) (text, tone string) {
+	switch id {
+	case "websearch":
+		if !a.settings.LauncherWebSearchEnabled {
+			return "", ""
+		}
+		if len(a.webSearchEngines()) == 0 {
+			return "未配置引擎", "warn"
+		}
+		return "", ""
+	case "vscode":
+		return launcherToolBadge(
+			a.settings.LauncherVSCodeEnabled, a.settings.LauncherVSCodeFolders,
+			a.vscode.checking, a.vscode.checked, a.vscodeIsReady(),
+		)
+	case "trae":
+		return launcherToolBadge(
+			a.settings.LauncherTraeEnabled, a.settings.LauncherTraeFolders,
+			a.trae.checking, a.trae.checked, a.traeIsReady(),
+		)
+	case "fork":
+		return launcherToolBadge(
+			a.settings.LauncherForkEnabled, a.settings.LauncherForkFolders,
+			a.fork.checking, a.fork.checked, a.forkIsReady(),
+		)
+	}
+	return "", ""
+}
+
+func launcherToolBadge(enabled bool, folders []string, checking, checked, ready bool) (text, tone string) {
+	if !enabled {
+		return "", ""
+	}
+	if checking {
+		return "检测中", "muted"
+	}
+	if checked && !ready {
+		return "未生效", "danger"
+	}
+	// 检测通过但还没有项目文件夹时，功能同样用不了。
+	if ready && len(normalizeProjectFolders(folders)) == 0 {
+		return "未配置文件夹", "warn"
+	}
+	return "", ""
 }
 
 // launcherSourceItem 每个启动项一张卡片：标题行点击展开/收起，配置抽屉收在卡片内。
@@ -818,19 +983,37 @@ func (a *app) launcherSourceItem(c *ui.Context, id, title, desc string, on *bool
 				ui.Image(c, toolIcon).Size(30, 30)
 			} else {
 				iconName := "app"
-				if id == "files" {
+				switch id {
+				case "files":
 					iconName = "file"
+				case "websearch":
+					iconName = "language"
 				}
 				iconTile(c, iconName, 30, 9, colBgSoft, colTextSoft)
 			}
 			ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
-				ui.Text(c, title).FontSize(13).Bold()
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, title).FontSize(13).Bold()
+					// 关掉详情也能看到是否真的生效，避免开了开关却一直没配置。
+					if badge, tone := a.launcherSourceBadge(id); badge != "" {
+						badgeBg, badgeFg := colBgSoft, colTextMuted
+						switch tone {
+						case "warn":
+							badgeBg, badgeFg = colAccentSoft, colAccentStr
+						case "danger":
+							badgeBg, badgeFg = ui.RGBA(255, 107, 104, 0.14), colDanger
+						}
+						pill(c, badge, badgeBg, badgeFg)
+					}
+				})
 				ui.Text(c, desc).FontSize(11).TextColor(colTextMuted).MaxLines(2)
 			})
 			if ui.Switch(c, on).Label(title + "开关").Changed() {
 				switch id {
 				case "vscode":
 					a.afterVSCodeToggle()
+				case "trae":
+					a.afterTraeToggle()
 				case "fork":
 					a.afterForkToggle()
 				default:
@@ -894,6 +1077,23 @@ func (a *app) vscodeTool() projectTool {
 	}
 }
 
+func (a *app) traeTool() projectTool {
+	return projectTool{
+		id: "trae", label: "Trae", placeholder: "trae",
+		command:   &a.settings.LauncherTraeCommand,
+		folders:   &a.settings.LauncherTraeFolders,
+		status:    a.traeStatusText(),
+		checking:  a.trae.checking,
+		failed:    a.trae.err != "",
+		ready:     a.traeIsReady(),
+		onCommand: a.afterToolCommandChange,
+		onRetry:   a.detectTraeCommand,
+		onPick:    a.pickTraeFolders,
+		onRemove:  func(i int) { a.removeProjectFolder(&a.settings.LauncherTraeFolders, i, a.afterTraeFoldersChange) },
+		emptyHint: "还没有项目文件夹。点击“添加文件夹”选择一个或多个目录。",
+	}
+}
+
 func (a *app) forkTool() projectTool {
 	return projectTool{
 		id: "fork", label: "Fork", placeholder: "fork",
@@ -915,6 +1115,10 @@ func (a *app) vscodeCommandRow(c *ui.Context) { a.projectCommandRow(c, a.vscodeT
 
 func (a *app) vscodeFolderSection(c *ui.Context) { a.projectFolderSection(c, a.vscodeTool()) }
 
+func (a *app) traeCommandRow(c *ui.Context) { a.projectCommandRow(c, a.traeTool()) }
+
+func (a *app) traeFolderSection(c *ui.Context) { a.projectFolderSection(c, a.traeTool()) }
+
 func (a *app) forkCommandRow(c *ui.Context) { a.projectCommandRow(c, a.forkTool()) }
 
 func (a *app) forkFolderSection(c *ui.Context) { a.projectFolderSection(c, a.forkTool()) }
@@ -925,13 +1129,12 @@ func (a *app) projectCommandRow(c *ui.Context, t projectTool) {
 		in := ui.TextInput(c.Key(t.id+"-command"), t.command).
 			Placeholder(t.placeholder).Label(t.label + " 触发词").Height(40).WidthPercent(100)
 		if in.Changed() {
-			// 内置命令在浮窗里优先匹配，触发词占用同名后「命令 + 空格」
-			// 永远进不了项目模式，所以这里拒绝保存并回退到默认触发词。
-			if isBuiltinCommand(*t.command) {
-				bad := strings.TrimSpace(*t.command)
+			// 触发词在浮窗里必须唯一，占用内置命令或搜索触发词后「命令 + 空格」
+			// 会被别的功能截走，所以这里拒绝保存并回退到默认触发词。
+			if reason := a.projectCommandConflict(*t.command); reason != "" {
 				*t.command = ""
 				t.onCommand()
-				a.toast("“" + bad + "”是内置命令，不能作为触发词")
+				a.toast(reason)
 				return
 			}
 			t.onCommand()
@@ -1008,6 +1211,86 @@ func (a *app) projectFolderSection(c *ui.Context, t projectTool) {
 	})
 }
 
+// webSearchSettings 是「网页搜索」卡片的配置抽屉：引擎列表 + 预设添加。
+func (a *app) webSearchSettings(c *ui.Context) {
+	ui.Column(c).Gap(10).Children(func() {
+		ui.Column(c).Gap(3).Children(func() {
+			ui.Text(c, "搜索引擎").FontSize(11).Bold().TextColor(colTextSoft)
+			ui.Text(c, "输入触发词 + 空格 + 关键词搜索网页；地址用 %s 表示关键词。").
+				FontSize(11).TextColor(colTextMuted)
+		})
+
+		if len(a.settings.LauncherWebSearchEngines) == 0 {
+			ui.Row(c).Padding(12).Radius(10).Background(ui.RGBA(255, 255, 255, 0.035)).
+				Border(1, colLine).Children(func() {
+				ui.Text(c, "还没有添加搜索引擎，点击下方预设开始。").FontSize(12).TextColor(colTextMuted)
+			})
+		}
+		for i := range a.settings.LauncherWebSearchEngines {
+			eng := &a.settings.LauncherWebSearchEngines[i]
+			ui.Column(c.Key("websearch-"+eng.ID)).Gap(8).Padding(12).Radius(10).
+				Background(ui.RGBA(255, 255, 255, 0.035)).Border(1, colLine).Children(func() {
+				fieldLabel := func(text string) {
+					ui.Text(c, text).FontSize(11).TextColor(colTextMuted).Width(52)
+				}
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					fieldLabel("名称")
+					if in := ui.TextInput(c.Key("websearch-name-"+eng.ID), &eng.Name).
+						Placeholder("如 百度").Height(36).Grow(1); in.Changed() {
+						a.afterWebSearchChange()
+					}
+					if ghostBtn(c, "移除").Label("移除 " + webSearchName(*eng)).MinHeight(26).Clicked() {
+						a.removeWebSearchEngine(eng.ID)
+					}
+				})
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					fieldLabel("触发词")
+					if in := ui.TextInput(c.Key("websearch-command-"+eng.ID), &eng.Command).
+						Placeholder("如 bd").Height(36).Grow(1); in.Changed() {
+						// 触发词在浮窗里必须唯一，冲突时回退，避免永远匹配不到。
+						if reason := a.webSearchCommandConflict(eng.ID, eng.Command); reason != "" {
+							eng.Command = ""
+							a.afterWebSearchChange()
+							a.toast(reason)
+						} else {
+							a.afterWebSearchChange()
+						}
+					}
+				})
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					fieldLabel("搜索地址")
+					if in := ui.TextInput(c.Key("websearch-url-"+eng.ID), &eng.URL).
+						Placeholder("https://www.baidu.com/s?wd=%s").
+						Height(36).Grow(1); in.Changed() {
+						a.afterWebSearchChange()
+					}
+				})
+				if strings.TrimSpace(eng.URL) != "" && !strings.Contains(eng.URL, "%s") {
+					ui.Text(c, "搜索地址需要包含 %s 占位符").FontSize(11).TextColor(colDanger)
+				}
+			})
+		}
+
+		ui.Row(c).Gap(8).Children(func() {
+			added := make(map[string]bool, len(a.settings.LauncherWebSearchEngines))
+			for _, eng := range a.settings.LauncherWebSearchEngines {
+				added[eng.ID] = true
+			}
+			for _, preset := range webSearchPresets {
+				if added[preset.ID] {
+					continue
+				}
+				if secondaryBtn(c, "添加 "+preset.Name).Clicked() {
+					a.addWebSearchPreset(preset.ID)
+				}
+			}
+			if secondaryBtn(c, "自定义").Clicked() {
+				a.addCustomWebSearch()
+			}
+		})
+	})
+}
+
 // afterToolCommandChange 保存触发词改动。触发词只影响「命令 + 空格」的
 // 输入匹配，不重新探测，已检测到的命令保持不变。
 func (a *app) afterToolCommandChange() {
@@ -1022,6 +1305,10 @@ func (a *app) afterToolCommandChange() {
 
 func (a *app) pickVSCodeFolders() {
 	a.pickProjectFolders(&a.settings.LauncherVSCodeFolders, a.afterVSCodeFoldersChange)
+}
+
+func (a *app) pickTraeFolders() {
+	a.pickProjectFolders(&a.settings.LauncherTraeFolders, a.afterTraeFoldersChange)
 }
 
 func (a *app) pickForkFolders() {
@@ -1106,6 +1393,8 @@ func (a *app) afterProjectFoldersChange() {
 
 func (a *app) afterVSCodeFoldersChange() { a.afterProjectFoldersChange() }
 
+func (a *app) afterTraeFoldersChange() { a.afterProjectFoldersChange() }
+
 func (a *app) afterForkFoldersChange() { a.afterProjectFoldersChange() }
 
 func (a *app) afterVSCodeToggle() {
@@ -1120,6 +1409,24 @@ func (a *app) afterVSCodeToggle() {
 		a.vscode = vscodeState{}
 		a.refreshMain()
 		a.toast("VS Code 快速打开已关闭")
+	}
+	if a.launcher != nil {
+		a.launcher.projectSettingsChanged()
+	}
+}
+
+func (a *app) afterTraeToggle() {
+	if err := a.persist(); err != nil {
+		a.toast("保存失败：" + err.Error())
+		return
+	}
+	if a.settings.LauncherTraeEnabled {
+		a.detectTraeCommand()
+		a.toast("Trae 快速打开已开启")
+	} else {
+		a.trae = traeState{}
+		a.refreshMain()
+		a.toast("Trae 快速打开已关闭")
 	}
 	if a.launcher != nil {
 		a.launcher.projectSettingsChanged()
