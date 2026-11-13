@@ -64,7 +64,7 @@ func (a *app) ready() {
 			return
 		}
 		e.PreventDefault()
-		a.win.Hide()
+		a.hideMain()
 	})
 
 	a.setUpTray()
@@ -94,12 +94,24 @@ func (a *app) watchUpdates() {
 	a.refreshUpdateState()
 }
 
+// showMain 打开主窗口，同时恢复 Dock 图标：本应用常驻菜单栏，
+// Dock 只在主窗口开着时出现，避免留下一个点了没反应的图标。
 func (a *app) showMain() {
 	if a.win == nil {
 		return
 	}
+	mygo.App.Dock.Show()
 	a.win.Show()
 	a.win.Focus()
+}
+
+// hideMain 收起主窗口，并把 Dock 图标一并收回（转为菜单栏应用）。
+func (a *app) hideMain() {
+	if a.win == nil {
+		return
+	}
+	a.win.Hide()
+	mygo.App.Dock.Hide()
 }
 
 func (a *app) toggleMain() {
@@ -107,7 +119,7 @@ func (a *app) toggleMain() {
 		return
 	}
 	if a.win.IsVisible() && a.win.IsFocused() {
-		a.win.Hide()
+		a.hideMain()
 	} else {
 		a.showMain()
 	}
