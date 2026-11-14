@@ -81,6 +81,13 @@ func (a *app) ready() {
 	if a.settings.LauncherEnabled && a.settings.LauncherTraeEnabled {
 		a.detectTraeCommand()
 	}
+	// 开机自启时由系统在登录后拉起进程，用户此时并没有要打开应用：
+	// 只保留托盘常驻，需要时再从托盘或快捷键进入。macOS 还要收回 Dock 图标，
+	// 与“关闭主窗口”后的状态保持一致，否则 Dock 上会多出一个点了没反应的图标。
+	if mygo.App.WasOpenedAtLogin() {
+		mygo.App.Dock.Hide()
+		return
+	}
 	a.win.Show()
 }
 
