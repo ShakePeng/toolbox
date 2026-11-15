@@ -107,9 +107,10 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 
 1. `startCapture`（`capture.go`）用光标位置找当前显示器；抓取区域是 `disp.Bounds`（整屏），不是 `WorkArea`（后者会裁掉菜单栏/程序坞）。
 2. macOS 先通过 `CGPreflightScreenCaptureAccess` 检查权限（`perm_screen_darwin.go`），没权限就申请并提示；避免无权限时 `screencapture` 静默只抓壁纸。
-3. 先收起翻译浮窗和主窗口，再 `captureRegion`：macOS 调 `/usr/sbin/screencapture -x -t png -R`；Windows 用 GDI `BitBlt` + `GetDIBits`（进程是 Per-Monitor V2 DPI 感知，拿到的是物理像素）；其他平台直接返回错误。
+3. 先收起翻译浮窗，再 `captureRegion`：macOS 调 `/usr/sbin/screencapture -x -t png -R`；Windows 用 GDI `BitBlt` + `GetDIBits`（进程是 Per-Monitor V2 DPI 感知，拿到的是物理像素）；其他平台直接返回错误。**主窗口不隐藏也不恢复**：隐藏再 `Show` 会让它闪一下，最小化的窗口还会被还原到屏幕上；代价是主窗口会留在冻结画面里。
 4. 创建全屏覆盖层：`show` 后用 `mygo.RunOnMain` 调 `coverSystemUI`（macOS 去掉 titled 样式、层级提到 1000）、重新 `SetBounds` 整屏、`focusWindowContent` 让键盘事件可用。`safeBottom` 取自 `WorkArea`，保证工具栏不会落到程序坞下面点不到。
 5. 覆盖层渲染冻结画面（`bitmap`）+ 整体压暗 + 选区内还原；标注统一裁剪到选区，绘制工具在选区外无效。`marks.go` 只放纯几何/绘制逻辑（命中检测、矩形归一化、马赛克采样），便于单测。
+   悬停选窗：在抓屏之前枚举一次应用窗口（`capture_hover_*.go`，返回屏幕 DIP 的 z 序列表），`capture_hover.go` 负责裁剪到当前屏幕并换算成覆盖层局部坐标。无选区时鼠标悬停会还原光标下窗口的画面并描 1px 白边；按下后几乎没动才把窗口矩形变成选区，移动超过 3 点则退化成普通框选（`dsPickWin`）。悬停只在 `!hasSel` 时绘制，因此不会进入 `CapturePage` 的输出图。
 6. 输入：`Esc`/右键退出；`Enter`/`Cmd+C` 复制；`Cmd+S` 保存；`Delete`/`Backspace` 删除选中标注；`Cmd+Z` / `Shift+Z` 撤销重做；双击选区内复制、选区外双击全屏；点击别处会让正在编辑的文字落笔。
 7. 输出通过 `requestComplete` 延后一帧：先 `flushText` 让文字框收起，下一帧再 `win.CapturePage()`，否则输入框会被截进图里。
 8. `complete()` 把覆盖层像素按 `物理像素 / 逻辑尺寸` 换算后裁剪（四周内缩 1 点去边框），再复制到剪贴板 / 弹保存面板（`Parent` 绑定当前覆盖层，避免多显示器弹到另一块屏）/ 创建贴图。保存或贴图失败时保留覆盖层可重试。
@@ -174,14 +175,16 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 
 ### 平台适配与资源
 
-- 平台差异全部用构建标签：`capture_*`、`selection_*`、`perm_screen_*`、`window_level_*`。Linux 目前没有截图和选区实现。
+- 平台差异全部用构建标签：`capture_*`、`capture_hover_*`、`selection_*`、`perm_screen_*`、`window_level_*`。Linux 目前没有截图和选区实现。
 - macOS 覆盖层层级/样式、键盘焦点通过 Objective-C runtime 调整（`window_level_darwin.go`）。
+- 窗口枚举（`capture_hover_darwin.go` / `capture_hover_windows.go`）：macOS 用 `CGWindowListCopyWindowInfo`（只取 `kCGWindowBounds` 等元数据，不需要窗口标题），坐标本身就是「主屏左上、y 向下、逻辑点」，与 `mygo.Rectangle` 一致，不翻转；自带一套 `pick*` 前缀的 purego 绑定，不能复用 `selection_darwin.go` 里需要先 `loadAX()` 的全局函数。Windows 用 `EnumWindows` + `DwmGetWindowAttribute`，窗口矩形是物理像素，靠「该显示器物理矩形 → `disp.Bounds`」的比例映射换算成 DIP（不能简单除以 DPI，mygo 的 DIP 原点按全屏最小 DPI 计算）；`syscall.NewCallback` 的回调注册在包级只做一次，回调内必须 recover。
 - 图标：`resources/icon.png` 用 `go:embed` 嵌入；线性图标和品牌图标是 SVG 字符串表，初始化时 `ui.MustParseSVG` 解析一次，避免每帧重复解析。
 - 应用版本唯一来源是 `mygo.json` 的 `version`；`appVersion()` 优先读打包信息，开发构建回退到内嵌的 `mygo.json`。
 
 ## 测试
 
 - UI 测试用 `ui.NewTester(view, w, h)`，可 `HasText`、`Click`、模拟输入/快捷键并多次 `Frame()`。断言依赖系统中文字体，所以 CI 的 test job 固定在 `macos-latest`。
+- `capture_hover_test.go` 覆盖窗口矩形裁剪/排序/命中、单击选窗、窗口内拖拽退化成框选、有选区后不再画悬停（含像素级断言）；`capture_hover_windows_test.go`（`//go:build windows`）覆盖物理像素→DIP 换算与窗口过滤，在 windows-latest job 运行。
 - `render_test.go` 只在 `RENDER=1` 时运行，把各页面（含启动页和启动器浮窗）、不同窗口宽度渲染成 PNG 到系统临时目录的 `toolbox_render`，用于人工核对响应式布局，不参与 CI。
 - 翻译测试用 `httptest`，不访问真实接口；覆盖语言判断、Provider 过滤、百度错误码等。
 - 启动器测试分四层：`launcher_search_test.go` 覆盖评分/过滤/排序；`launcher_index_test.go` 用临时目录验证跳过规则、深度和上限；`launcher_projects_test.go` 覆盖「命令 + 空格」解析、下一级目录扫描和项目过滤；`launcher_test.go` 用 `ui.NewTester` 渲染浮窗，并注入假应用/文件/项目和 `launchApp`/`openPath`/`launchProject`，不启动真实应用。
@@ -203,6 +206,7 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 
 - 翻译凭据明文保存在 `config.json`。
 - Linux 没有截图和选区读取实现；Windows 划词在终端类应用不可用，管理员权限运行的应用也可能读不到。
+- 截图悬停选窗：候选窗口在抓屏那一刻采样一次，覆盖层打开期间真实窗口移动不会反映（这是刻意的，与冻结画面对齐）。贴图窗口属于本进程会被排除，浮在窗口上时高亮的是它背后的窗口，但输出图里仍包含贴图。Windows 上没有标题且没有 `WS_EX_APPWINDOW` 的窗口不参与命中；跨屏且两屏缩放比例不同的窗口按所在显示器 DPI 近似换算，误差在 1 DIP 级。
 - macOS 15 对直接抓屏有约 30 天一次的「Allow For One Month」确认，与签名无关。
 - 自签名证书不能公证，新机器首次打开需在「隐私与安全性」里选择「仍要打开」；证书 2036-11-06 到期。
 - 原生 UI 没有内容自适应高度，翻译浮窗高度是估算值（`fitHeight`），改布局时要同步调整估算。启动器浮窗按 `launcherHeaderHeight` / `launcherRowHeight` 等常量估算高度（67–540），改行内边距或字号时要同步调整这些常量；结果区仍用 `Scroll` 兜底。

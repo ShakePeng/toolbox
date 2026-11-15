@@ -30,6 +30,9 @@ const (
 	dsMoveSel
 	dsDraw
 	dsMoveMark
+	// dsPickWin 是「按在候选窗口上、还没确认」的中间态：抬起时几乎没动
+	// 就选中整个窗口，移动超过阈值则退化成 dsNewSel 自由框选。
+	dsPickWin
 )
 
 type captureSession struct {
@@ -47,13 +50,17 @@ type captureSession struct {
 	// safeBottom 是可被点到的区域下边界，避开底部的程序坞。
 	safeBottom float32
 
-	restoreMain bool // 结束后是否恢复主窗口
-	// restoreInactive 让贴图结束后恢复主窗口时不抢焦点：用户接着要拖贴图
-	// 或回到原应用，不该被工具箱打断。
-	restoreInactive bool
-
 	hasSel bool
 	sel    ui.Rect
+
+	// windows 是覆盖层局部坐标的候选窗口（z 序从前到后），采集一次后不再变化：
+	// 高亮画在冻结画面上，窗口之后移动也不会和画面错位。
+	windows []ui.Rect
+	// hover 是光标下的窗口下标，-1 表示没有。必须显式初始化成 -1，
+	// 零值 0 会在有候选窗口时凭空高亮第一个窗口。
+	hover int
+	// pickWin 是按下时命中的窗口下标，抬起确认或取消后回到 -1。
+	pickWin int
 
 	tool        string
 	color       ui.Color
@@ -109,28 +116,26 @@ func (a *app) startCapture() {
 	if a.trans != nil {
 		a.trans.hide()
 	}
-	restore := a.win != nil && a.win.IsVisible()
-	if restore {
-		a.win.Hide()
-	}
+	// 主窗口保持原样，不隐藏也不恢复：隐藏再 Show 会让它闪一下，
+	// 而且最小化窗口的 IsVisible 也是 true，Show() 会把它还原到屏幕上。
+	// 代价是主窗口会出现在冻结画面里，用户需要避开时自己挪开窗口即可。
+
+	// 悬停选窗的候选列表要在覆盖层创建之前、紧挨着抓屏采集：
+	// 此刻覆盖层还不存在，列表和马上冻结的画面处在同一时刻。
+	// 本进程的窗口由平台层按 PID 排除。失败时返回空列表，只是没有悬停提示。
+	wins := listCaptureWindows(disp)
 
 	pngData, img, err := captureRegion(disp, area)
 	if err != nil {
-		if restore {
-			a.win.Show()
-		}
 		a.toast("截图失败：" + err.Error())
 		return
 	}
-	a.openCaptureOverlay(disp, area, pngData, img, restore)
+	a.openCaptureOverlay(disp, area, pt, pngData, img, wins)
 }
 
-func (a *app) openCaptureOverlay(disp mygo.Display, area mygo.Rectangle, pngData []byte, img image.Image, restore bool) {
+func (a *app) openCaptureOverlay(disp mygo.Display, area mygo.Rectangle, cursor mygo.Point, pngData []byte, img image.Image, wins []mygo.Rectangle) {
 	bitmap, err := ui.DecodeBitmap(pngData)
 	if err != nil {
-		if restore {
-			a.win.Show()
-		}
 		a.toast("加载截图失败：" + err.Error())
 		return
 	}
@@ -138,6 +143,7 @@ func (a *app) openCaptureOverlay(disp mygo.Display, area mygo.Rectangle, pngData
 	if scale <= 0 {
 		scale = 1
 	}
+	windows := localWindowRects(area, wins)
 	s := &captureSession{
 		app:         a,
 		display:     disp,
@@ -147,11 +153,14 @@ func (a *app) openCaptureOverlay(disp mygo.Display, area mygo.Rectangle, pngData
 		W:           float32(area.Width),
 		H:           float32(area.Height),
 		scale:       scale,
-		restoreMain: restore,
 		tool:        "select",
 		color:       ui.RGBA(244, 63, 63, 1),
 		strokeWidth: 3,
 		selected:    -1,
+		windows:     windows,
+		// 覆盖层刚出现、鼠标还没移动时就已经高亮光标下的窗口。
+		hover:   windowAt(ui.Point{X: float32(cursor.X - area.X), Y: float32(cursor.Y - area.Y)}, windows),
+		pickWin: -1,
 	}
 	// 可点击区域的下边界（相对覆盖层）：程序坞在底部时，WorkArea 的下边界
 	// 会比整屏高，工具栏不能落在那之外，否则会被程序坞挡住点不到。
@@ -269,6 +278,17 @@ func (s *captureSession) paint(p *ui.Painter) {
 	}
 	// 整体压暗蒙层（有无选区都先压暗，明确这是截图态）
 	p.Fill(full, ui.RGBA(0, 0, 0, 0.42), 0)
+	// 悬停的窗口内部也还原成清晰画面：让用户直接看到「单击会截到什么」。
+	// 只在没有选区时生效，悬停只是预览，不能和真实选区同时出现。
+	if !s.hasSel {
+		if hr, ok := s.hoverRect(); ok {
+			p.Clip(hr, 0, func() {
+				if s.bitmap != nil {
+					p.Image(s.bitmap, full, ui.FillBox)
+				}
+			})
+		}
+	}
 	// 选区内部还原成清晰画面
 	if s.hasSel {
 		if sel := normRect(s.sel); sel.W > 0 && sel.H > 0 {
@@ -298,6 +318,7 @@ func (s *captureSession) paint(p *ui.Painter) {
 	}
 	s.paintSel(p)
 	if !s.hasSel {
+		s.paintHover(p)
 		s.paintHint(p)
 	}
 }
@@ -305,10 +326,13 @@ func (s *captureSession) paint(p *ui.Painter) {
 // paintHint 在尚未框选时给出操作提示。
 func (s *captureSession) paintHint(p *ui.Painter) {
 	const (
-		txt        = "拖拽选择区域 · 双击复制 · Esc / 右键退出"
 		size       = 13
 		padX, padY = 18, 7
 	)
+	txt := "拖拽选择区域 · 双击复制 · Esc / 右键退出"
+	if s.tool == "select" && len(s.windows) > 0 {
+		txt = "单击选中窗口 · 拖拽框选 · Esc / 右键退出"
+	}
 	// 按文字实际尺寸算背景框，文字才能真正居中（p.Text 的 y 是布局顶边）。
 	tw, th := p.MeasureText(0, ui.Span{Text: txt, Size: size})
 	w, h := tw+2*padX, th+2*padY
@@ -458,6 +482,15 @@ func (s *captureSession) onInput(ev ui.InputEvent) bool {
 				return true
 			}
 			if !s.hasSel {
+				// 按在候选窗口上时先不建选区：抬起时几乎没动才选中整个窗口，
+				// 按下后拖动则退化成普通框选。hasSel 保持 false，画面仍是
+				// 「压暗 + 悬停高亮」，工具栏也不会提前出现。
+				if idx := windowAt(p, s.windows); idx >= 0 {
+					s.drag = dsPickWin
+					s.pickWin = idx
+					s.hover = idx
+					return true
+				}
 				s.drag = dsNewSel
 				s.hasSel = true
 				s.sel = ui.Rect{X: p.X, Y: p.Y}
@@ -497,6 +530,16 @@ func (s *captureSession) onInput(ev ui.InputEvent) bool {
 
 	case ui.InputPointerMove:
 		switch s.drag {
+		case dsPickWin:
+			// 按住不动时高亮固定在按下时的窗口；一旦超过阈值，立刻变成
+			// 从按下点开始的普通框选。
+			if movedBeyond(s.press, p, pickDragSlop) {
+				s.drag = dsNewSel
+				s.hasSel = true
+				s.sel = rectFromPoints(s.press, p)
+				s.clampSel()
+				s.pickWin, s.hover = -1, -1
+			}
 		case dsNewSel:
 			s.sel = rectFromPoints(s.press, p)
 			s.clampSel()
@@ -514,18 +557,36 @@ func (s *captureSession) onInput(ev ui.InputEvent) bool {
 		case dsDraw:
 			s.updateDraft(p)
 		}
+		// 只有「没有选区、也没按住」时悬停才跟随指针。
+		if !s.hasSel && s.drag == dsNone {
+			s.hover = windowAt(p, s.windows)
+		}
 		if s.win != nil {
 			s.win.Invalidate()
 		}
 		return true
 
 	case ui.InputPointerUp:
+		// 系统收走了这次按下（窗口失去抓取等），不要把它当成一次单击选窗。
+		if ev.Canceled && s.drag == dsPickWin {
+			s.drag = dsNone
+			s.pickWin = -1
+			s.hover = windowAt(p, s.windows)
+			if s.win != nil {
+				s.win.Invalidate()
+			}
+			return true
+		}
 		switch s.drag {
+		case dsPickWin:
+			s.commitPick(p)
 		case dsNewSel:
 			s.sel = rectFromPoints(s.press, p)
 			s.clampSel()
 			if s.sel.W < 3 || s.sel.H < 3 {
+				// 只是原地单击：清掉选区，并把悬停恢复到指针下的窗口。
 				s.hasSel = false
+				s.hover = windowAt(p, s.windows)
 			}
 		case dsDraw:
 			s.updateDraft(p)
@@ -1007,7 +1068,6 @@ func (s *captureSession) complete(action captureAction) {
 			// 贴图失败时保留覆盖层，和保存失败一样，用户还能重试。
 			return
 		}
-		s.restoreInactive = true
 	}
 	s.close()
 }
@@ -1037,11 +1097,5 @@ func (s *captureSession) close() {
 		s.win.Destroy()
 	}
 	s.app.capture = nil
-	if s.restoreMain && s.app.win != nil {
-		if s.restoreInactive {
-			s.app.win.ShowInactive()
-		} else {
-			s.app.win.Show()
-		}
-	}
+	// 主窗口全程没有被动过，这里不需要恢复它。
 }

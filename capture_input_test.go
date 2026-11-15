@@ -13,6 +13,7 @@ func newTestSession() *captureSession {
 		W:   400, H: 300, scale: 1,
 		tool: "select", color: ui.RGBA(244, 63, 63, 1), strokeWidth: 3,
 		selected: -1,
+		hover:    -1, pickWin: -1,
 	}
 }
 
