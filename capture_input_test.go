@@ -142,11 +142,50 @@ func TestOutputFrameHidesToolbar(t *testing.T) {
 	if _, ok := tt.Find("复制"); ok {
 		t.Fatal("输出帧不应绘制工具栏")
 	}
+	if s.chromeBuilt {
+		t.Fatal("输出帧的树不应包含工具栏")
+	}
+	if !s.outputReady {
+		t.Fatal("干净帧画完后应置 outputReady，供下一帧取图")
+	}
 
 	s.pending = nil
 	tt.Frame()
 	if _, ok := tt.Find("复制"); !ok {
 		t.Fatal("取消输出后工具栏应恢复")
+	}
+}
+
+// 输入回调在 view 之后请求输出时，本帧的树已经带工具栏，不能直接当输出帧；
+// 必须等下一整帧干净画面画完。
+func TestOutputArmsOnlyForCleanFrame(t *testing.T) {
+	s := newTestSession()
+	act := actCopy
+	s.pending = &act
+
+	s.chromeBuilt = true
+	s.finishOutputFrame()
+	if s.outputReady {
+		t.Fatal("带工具栏的帧不能作为输出帧")
+	}
+
+	s.chromeBuilt = false
+	s.finishOutputFrame()
+	if !s.outputReady {
+		t.Fatal("干净帧画完后应允许取图")
+	}
+}
+
+// 新的输出请求要重新等待干净帧，不能沿用上一轮的闩锁。
+func TestRequestCompleteResetsArming(t *testing.T) {
+	s := newTestSession()
+	s.outputReady = true
+	s.requestComplete(actSave)
+	if s.outputReady {
+		t.Fatal("新的输出请求应清除取图闩锁")
+	}
+	if s.pending == nil || *s.pending != actSave {
+		t.Fatalf("pending 不正确：%v", s.pending)
 	}
 }
 

@@ -88,6 +88,14 @@ type captureSession struct {
 
 	// 待执行的输出动作。输出要等一帧再截，否则正在输入的文字框会被截进图里。
 	pending *captureAction
+	// outputReady 表示已经画完一整帧「没有工具栏和文字框」的待输出画面。
+	// CapturePage 取的是上一次 present 的帧，所以必须等干净帧真正画完，
+	// 下一帧开头才能取；直接在同一次请求里取会拿到带工具栏的旧帧。
+	outputReady bool
+	// chromeBuilt 记录本次 view 构建的树里是否有工具栏或文字输入框。
+	// 输入回调（双击、右键）可能在 view 之后才请求输出，那一帧的树已经带工具栏，
+	// 不能当输出帧。
+	chromeBuilt bool
 
 	closed bool
 }
@@ -218,11 +226,15 @@ func (s *captureSession) view(c *ui.Context) {
 	if s.closed {
 		return
 	}
-	// 上一帧的输出请求在这里执行：此时画面已经按“输入框已收起”重绘过，
-	// 再取画面才不会把输入框截进去。没有窗口时没有画面可取，保留请求。
-	if s.pending != nil && s.win != nil {
+	// 每次 view 都重新描述本帧的树：多 pass 时以最后一次构建为准。
+	s.chromeBuilt = false
+	// 输出请求在这里执行，但必须等到一整帧干净画面已经画完（outputReady）：
+	// CapturePage 取的是上一次 present 的帧，提前取会拿到带工具栏的旧画面。
+	// 没有窗口时没有画面可取，保留请求。
+	if s.pending != nil && s.win != nil && s.outputReady {
 		act := *s.pending
 		s.pending = nil
+		s.outputReady = false
 		s.complete(act)
 		if s.closed {
 			return
@@ -265,9 +277,13 @@ func (s *captureSession) view(c *ui.Context) {
 		})
 		// 只有首次拉框时收起工具栏；绘制/移动过程中保持显示，
 		// 免得工具栏闪一下又出现（mygo 按下后由被按元素独占 move/up，不会抢事件）。
-		// 已请求输出时也不画：Pending 帧会被 CapturePage 取走，工具栏不能进图。
+		// 已请求输出时也不画：这一帧会被 CapturePage 取走，工具栏不能进图。
 		if s.hasSel && s.drag != dsNewSel && s.pending == nil {
+			s.chromeBuilt = true
 			s.toolbar(c)
+		}
+		if s.editingText && s.pending == nil {
+			s.chromeBuilt = true
 		}
 		s.textEditor(c)
 	})
@@ -326,6 +342,21 @@ func (s *captureSession) paint(p *ui.Painter) {
 	if !s.hasSel {
 		s.paintHover(p)
 		s.paintHint(p)
+	}
+	s.finishOutputFrame()
+}
+
+// finishOutputFrame 在一帧画完后标记它能否作为 CapturePage 的取图对象。
+// 输入回调（双击、右键）可能在本帧 view 构建之后才请求输出，那一帧的树里
+// 仍有工具栏；必须等下一整帧都在 pending 状态下构建出来，才能让 view 消费。
+func (s *captureSession) finishOutputFrame() {
+	if s.pending == nil || s.chromeBuilt || s.outputReady {
+		return
+	}
+	s.outputReady = true
+	if s.win != nil {
+		// 干净帧还要真正 present 一次，下一帧才能取到它。
+		s.win.Invalidate()
 	}
 }
 
@@ -736,7 +767,7 @@ func (s *captureSession) commitText() {
 }
 
 func (s *captureSession) textEditor(c *ui.Context) {
-	if !s.editingText {
+	if !s.editingText || s.pending != nil {
 		return
 	}
 	ui.Row(c).Absolute().Left(clamp(s.textPos.X, 4, s.W-260)).Top(clamp(s.textPos.Y, 4, s.H-48)).
@@ -990,12 +1021,14 @@ func (s *captureSession) strokeWidthButton(c *ui.Context, width float32, label s
 
 // ---------------- 输出 ----------------
 
-// requestComplete 请求输出，真正截取放到下一帧。
-// CapturePage 取的是上一帧已经画好的画面：先把正在输入的文字落笔，
-// 让这一帧按“输入框已收起”重绘，下一帧再截，输入框才不会被打进图里。
+// requestComplete 请求输出：先收起文字框，等一整帧没有工具栏/输入框的画面
+// 画完（finishOutputFrame 置 outputReady），再在下一帧用 CapturePage 取它。
+// CapturePage 取的是上一次 present 的帧，提前取会拿到请求前的旧画面。
 func (s *captureSession) requestComplete(action captureAction) {
 	s.flushText()
 	s.pending = &action
+	// 新请求必须重新等一帧干净画面，不能复用上一轮的闩锁。
+	s.outputReady = false
 	if s.win != nil {
 		s.win.Invalidate()
 	}
