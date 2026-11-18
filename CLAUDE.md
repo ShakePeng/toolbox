@@ -110,9 +110,9 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 3. 先收起翻译浮窗，再 `captureRegion`：macOS 调 `/usr/sbin/screencapture -x -t png -R`；Windows 用 GDI `BitBlt` + `GetDIBits`（进程是 Per-Monitor V2 DPI 感知，拿到的是物理像素）；其他平台直接返回错误。**主窗口不隐藏也不恢复**：隐藏再 `Show` 会让它闪一下，最小化的窗口还会被还原到屏幕上；代价是主窗口会留在冻结画面里。
 4. 创建全屏覆盖层：`show` 后用 `mygo.RunOnMain` 调 `coverSystemUI`（macOS 去掉 titled 样式、层级提到 1000）、重新 `SetBounds` 整屏、`focusWindowContent` 让键盘事件可用。`safeBottom` 取自 `WorkArea`，保证工具栏不会落到程序坞下面点不到。
 5. 覆盖层渲染冻结画面（`bitmap`）+ 整体压暗 + 选区内还原；标注统一裁剪到选区，绘制工具在选区外无效。`marks.go` 只放纯几何/绘制逻辑（命中检测、矩形归一化、马赛克采样），便于单测。
-   悬停选窗：在抓屏之前枚举一次应用窗口（`capture_hover_*.go`，返回屏幕 DIP 的 z 序列表），`capture_hover.go` 负责裁剪到当前屏幕并换算成覆盖层局部坐标。无选区时鼠标悬停会还原光标下窗口的画面并描 1px 白边；按下后几乎没动才把窗口矩形变成选区，移动超过 3 点则退化成普通框选（`dsPickWin`）。悬停只在 `!hasSel` 时绘制，因此不会进入 `CapturePage` 的输出图。
+   悬停选窗：在抓屏之前枚举一次应用窗口（`capture_hover_*.go`，返回屏幕 DIP 的 z 序列表），`capture_hover.go` 负责裁剪到当前屏幕并换算成覆盖层局部坐标。覆盖层打开时整屏压暗、不预选窗口，指针首次移动后才还原光标下窗口的画面并描 1px 白边；按下后几乎没动才把窗口矩形变成选区，移动超过 3 点则退化成普通框选（`dsPickWin`）。悬停只在 `!hasSel` 时绘制，因此不会进入 `CapturePage` 的输出图。
 6. 输入：`Esc`/右键退出；`Enter`/`Cmd+C` 复制；`Cmd+S` 保存；`Delete`/`Backspace` 删除选中标注；`Cmd+Z` / `Shift+Z` 撤销重做；双击选区内复制、选区外双击全屏；点击别处会让正在编辑的文字落笔。
-7. 输出通过 `requestComplete` 延后一帧：先 `flushText` 让文字框收起，下一帧再 `win.CapturePage()`，否则输入框会被截进图里。
+7. 输出通过 `requestComplete` 延后一帧：先 `flushText` 让文字框收起，下一帧再 `win.CapturePage()`，否则输入框会被截进图里。挂起期间（`pending != nil`）工具栏与选区装饰（白边、手柄、尺寸标签）都不绘制，输出帧只保留画面和标注。
 8. `complete()` 把覆盖层像素按 `物理像素 / 逻辑尺寸` 换算后裁剪（四周内缩 1 点去边框），再复制到剪贴板 / 弹保存面板（`Parent` 绑定当前覆盖层，避免多显示器弹到另一块屏）/ 创建贴图。保存或贴图失败时保留覆盖层可重试。
 9. 覆盖层是全屏置顶窗口，绘制/输入/初始化都用 `recoverAndClose` 兜底 panic：异常时关闭蒙层并写日志，绝不把用户锁在窗口里。
 

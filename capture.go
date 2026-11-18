@@ -130,10 +130,10 @@ func (a *app) startCapture() {
 		a.toast("截图失败：" + err.Error())
 		return
 	}
-	a.openCaptureOverlay(disp, area, pt, pngData, img, wins)
+	a.openCaptureOverlay(disp, area, pngData, img, wins)
 }
 
-func (a *app) openCaptureOverlay(disp mygo.Display, area mygo.Rectangle, cursor mygo.Point, pngData []byte, img image.Image, wins []mygo.Rectangle) {
+func (a *app) openCaptureOverlay(disp mygo.Display, area mygo.Rectangle, pngData []byte, img image.Image, wins []mygo.Rectangle) {
 	bitmap, err := ui.DecodeBitmap(pngData)
 	if err != nil {
 		a.toast("加载截图失败：" + err.Error())
@@ -158,8 +158,9 @@ func (a *app) openCaptureOverlay(disp mygo.Display, area mygo.Rectangle, cursor 
 		strokeWidth: 3,
 		selected:    -1,
 		windows:     windows,
-		// 覆盖层刚出现、鼠标还没移动时就已经高亮光标下的窗口。
-		hover:   windowAt(ui.Point{X: float32(cursor.X - area.X), Y: float32(cursor.Y - area.Y)}, windows),
+		// 覆盖层刚出现时整屏压暗，不预选光标下的窗口：一打开就高亮会让人
+		// 误以为没进入截图态。指针移动后由 onInput 更新 hover 再做预览。
+		hover:   -1,
 		pickWin: -1,
 	}
 	// 可点击区域的下边界（相对覆盖层）：程序坞在底部时，WorkArea 的下边界
@@ -264,7 +265,8 @@ func (s *captureSession) view(c *ui.Context) {
 		})
 		// 只有首次拉框时收起工具栏；绘制/移动过程中保持显示，
 		// 免得工具栏闪一下又出现（mygo 按下后由被按元素独占 move/up，不会抢事件）。
-		if s.hasSel && s.drag != dsNewSel {
+		// 已请求输出时也不画：Pending 帧会被 CapturePage 取走，工具栏不能进图。
+		if s.hasSel && s.drag != dsNewSel && s.pending == nil {
 			s.toolbar(c)
 		}
 		s.textEditor(c)
@@ -316,7 +318,11 @@ func (s *captureSession) paint(p *ui.Painter) {
 	} else {
 		drawMarks()
 	}
-	s.paintSel(p)
+	// 选区白边、手柄和尺寸标签只是编辑期的装饰，同样不能进入输出图。
+	// 选区内部的清晰画面与标注在这之上，必须保留。
+	if s.pending == nil {
+		s.paintSel(p)
+	}
 	if !s.hasSel {
 		s.paintHover(p)
 		s.paintHint(p)

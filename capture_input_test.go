@@ -125,6 +125,62 @@ func TestToolbarStaysVisibleWhileDrawing(t *testing.T) {
 	}
 }
 
+// 请求输出到 CapturePage 之间，工具栏不能出现在这一帧里。
+// pending 在图里消费时才清空；这里 win 为 nil，正好停在「输出帧」。
+func TestOutputFrameHidesToolbar(t *testing.T) {
+	s := newTestSession()
+	tt := ui.NewTester(s.view, 400, 300)
+	dragSel(tt, 40, 40, 260, 200)
+	tt.Frame()
+	if _, ok := tt.Find("复制"); !ok {
+		t.Fatal("框选后应显示工具栏")
+	}
+
+	act := actCopy
+	s.pending = &act
+	tt.Frame()
+	if _, ok := tt.Find("复制"); ok {
+		t.Fatal("输出帧不应绘制工具栏")
+	}
+
+	s.pending = nil
+	tt.Frame()
+	if _, ok := tt.Find("复制"); !ok {
+		t.Fatal("取消输出后工具栏应恢复")
+	}
+}
+
+// 输出帧同样不能画选区边框、手柄和尺寸标签（全屏时尺寸标签落在图内）。
+func TestOutputFrameHidesSelectionDecorations(t *testing.T) {
+	s := newTestSession()
+	s.bitmap = grayBitmap(t, 400, 300)
+	s.hasSel = true
+	s.sel = ui.Rect{X: 0, Y: 0, W: 400, H: 300}
+	tt := ui.NewTester(s.view, 400, 300)
+
+	tt.Frame()
+	img := tt.Image()
+	if img == nil {
+		t.Fatal("渲染结果为空")
+	}
+	// 尺寸标签背景是黑色 0.6，压在 128 灰的还原画面上会明显变暗；
+	// 采样点避开标签里的白色文字。
+	if got := grayAt(img, 78, 14); got >= 120 {
+		t.Fatalf("尺寸标签应压暗背景，灰度=%d", got)
+	}
+
+	act := actCopy
+	s.pending = &act
+	tt.Frame()
+	img = tt.Image()
+	if img == nil {
+		t.Fatal("输出帧渲染结果为空")
+	}
+	if got := grayAt(img, 78, 14); got < 120 {
+		t.Fatalf("输出帧不应绘制尺寸标签，灰度=%d", got)
+	}
+}
+
 // 绘制工具在选区外拖拽：无反应，不绘制也不重新框选。
 func TestDrawToolOutsideSelection(t *testing.T) {
 	s := newTestSession()
