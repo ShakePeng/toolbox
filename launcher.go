@@ -723,6 +723,12 @@ func (s *launcherSession) resultRow(c *ui.Context, i int) {
 func (s *launcherSession) itemIcon(c *ui.Context, item launcherItem) {
 	if item.kind == launcherKindCommand {
 		if cmd, ok := lookupBuiltinCommand(item.command); ok {
+			// 命令 Icon 字段同时是 featureIcons 的 key：图片压缩等内置功能
+			// 用彩色位图，其余命令继续用琥珀色线性图标保持浮窗简洁。
+			if featIcon := featureIcons[cmd.Icon]; featIcon != nil {
+				ui.Image(c, featIcon).Size(28, 28)
+				return
+			}
 			iconTile(c, cmd.Icon, 28, 8, colAccentSoft, colAccentStr)
 			return
 		}
@@ -730,6 +736,10 @@ func (s *launcherSession) itemIcon(c *ui.Context, item launcherItem) {
 		return
 	}
 	if item.kind == launcherKindSearch {
+		if featIcon := featureIcons["websearch"]; featIcon != nil {
+			ui.Image(c, featIcon).Size(28, 28)
+			return
+		}
 		iconTile(c, "language", 28, 8, colAccentSoft, colAccentStr)
 		return
 	}
@@ -903,6 +913,8 @@ func (a *app) homeFeatureCard(c *ui.Context, f homeFeature) {
 		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 			if toolIcon := launcherToolIcons[f.id]; toolIcon != nil {
 				ui.Image(c, toolIcon).Size(28, 28)
+			} else if featIcon := featureIcons[f.id]; featIcon != nil {
+				ui.Image(c, featIcon).Size(28, 28)
 			} else {
 				iconTile(c, homeFeatureIcon(f.id), 28, 8, colBgSoft, colTextSoft)
 			}

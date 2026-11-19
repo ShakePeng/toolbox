@@ -44,6 +44,37 @@ var forkIcon = func() ui.ImageSource {
 	return bmp
 }()
 
+// 六个内置功能（划词翻译 / 截图标注 / 图片压缩 / 网页搜索 / 应用搜索 / 文件搜索）
+// 没有官方品牌图标，统一用 Microsoft Fluent Emoji flat 风格的彩色 SVG。
+// 位图（webp/png）在 28px 显示尺寸下会丢细节，flat SVG 是纯色填充的矢量图，
+// 任意缩放都锐利。源文件来自 https://github.com/microsoft/fluentui-emoji。
+// 注意要用 ui.Image 渲染（保留 SVG 内 fill），不能用 ui.Icon（会被强制单色化）。
+var (
+	//go:embed resources/feat_translate.svg
+	featTranslateSVG []byte
+	//go:embed resources/feat_screenshot.svg
+	featScreenshotSVG []byte
+	//go:embed resources/feat_image_compress.svg
+	featImageCompressSVG []byte
+	//go:embed resources/feat_websearch.svg
+	featWebsearchSVG []byte
+	//go:embed resources/feat_apps.svg
+	featAppsSVG []byte
+	//go:embed resources/feat_files.svg
+	featFilesSVG []byte
+)
+
+// featureIcons 是功能 id 到彩色 SVG 的映射。功能中心卡片和启动器浮窗里的
+// 结果行都从这张表取图，保证两处显示一致。
+var featureIcons = map[string]*ui.SVG{
+	"translate":      ui.MustParseSVG(featTranslateSVG),
+	"screenshot":     ui.MustParseSVG(featScreenshotSVG),
+	"image-compress": ui.MustParseSVG(featImageCompressSVG),
+	"websearch":      ui.MustParseSVG(featWebsearchSVG),
+	"apps":           ui.MustParseSVG(featAppsSVG),
+	"files":          ui.MustParseSVG(featFilesSVG),
+}
+
 // iconSVG 是以 currentColor 描边的轻量线性图标，风格对齐原 UiIcon。
 var iconSVG = map[string]string{
 	"home":           `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>`,
