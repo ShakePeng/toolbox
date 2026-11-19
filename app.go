@@ -1,9 +1,7 @@
 package main
 
 import (
-	"fmt"
 	"log"
-	"runtime"
 	"strings"
 	"time"
 
@@ -24,7 +22,7 @@ type app struct {
 
 	loading bool
 	loadErr string
-	section string // overview | translation | screenshot | settings
+	section string // overview | ai | settings
 
 	settings  Settings
 	providers []Provider
@@ -34,8 +32,13 @@ type app struct {
 	draft     *providerDraft
 	aiDraft   *aiSupplierDraft
 	recording string
+	// configModal 表示功能配置弹窗打开的类型：translate / screenshot / launcher-hotkey，
+	// 空串表示没有打开。截图和翻译不再有独立页面，配置都收进弹窗。
+	configModal string
 	// launcherSourceExpanded 只保存展开中的启动项，关闭设置页时也保留。
 	launcherSourceExpanded string
+	// homeCommandsExpanded 控制功能中心「内置命令」折叠小节的展开状态。
+	homeCommandsExpanded bool
 
 	// updatesOn 表示更新插件已装配（main 里 mygo.Use 之后才为 true）。
 	// 单元测试不跑 main，靠它跳过更新相关的调用。
@@ -71,6 +74,33 @@ func (a *app) refreshMain() {
 		return
 	}
 	a.win.Update(func() {})
+}
+
+// openSection 打开主窗口并切到指定页面，供启动器的设置类命令使用。
+func (a *app) openSection(id string) {
+	a.section = id
+	a.showMain()
+	a.refreshMain()
+}
+
+// openConfigModal 打开配置弹窗（目前只有启动器快捷键）。主窗口可能处于
+// 隐藏状态（例如从启动器命令的引导跳转过来），必须先把窗口唤起来，
+// 否则弹窗没人看得见。
+func (a *app) openConfigModal(kind string) {
+	a.configModal = kind
+	a.section = "overview"
+	a.showMain()
+	a.refreshMain()
+}
+
+// openFeatureDrawer 展开功能中心里某个功能（划词翻译、截图标注）的配置
+// 抽屉并唤起主窗口。翻译浮窗的「打开设置」走这里。
+func (a *app) openFeatureDrawer(id string) {
+	a.configModal = ""
+	a.launcherSourceExpanded = id
+	a.section = "overview"
+	a.showMain()
+	a.refreshMain()
 }
 
 type sectionItem struct {
@@ -139,6 +169,18 @@ func (a *app) toast(msg string) {
 	})
 }
 
+// notify 把提示送到用户当前真正看得见的窗口。主窗口常驻隐藏，
+// 光靠 toast 会让启动器里执行的命令失败时毫无反馈。
+func (a *app) notify(msg string) {
+	if s := a.launcher; s != nil && s.win != nil && !s.closed && s.win.IsVisible() {
+		s.notice = msg
+		s.fitHeight()
+		s.refresh()
+		return
+	}
+	a.toast(msg)
+}
+
 // ---------------- 视图根 ----------------
 
 func (a *app) view(c *ui.Context) {
@@ -178,6 +220,7 @@ func (a *app) view(c *ui.Context) {
 			}
 			a.providerModal(c)
 			a.aiSupplierModal(c)
+			a.configModalView(c)
 		})
 	})
 }
@@ -220,26 +263,11 @@ func (a *app) contentWidth(c *ui.Context) float32 {
 	return w
 }
 
-// twoColumn 表示两列布局够不够宽，否则堆叠。
-func (a *app) twoColumn(c *ui.Context) bool { return a.contentWidth(c) >= 560 }
-
 func (a *app) providerColumns(c *ui.Context) int {
 	switch cw := a.contentWidth(c); {
 	case cw >= 660:
 		return 3
 	case cw >= 430:
-		return 2
-	default:
-		return 1
-	}
-}
-
-// overviewColumns 让三张插件卡在宽屏并排，窄屏堆叠。
-func (a *app) overviewColumns(c *ui.Context) int {
-	switch cw := a.contentWidth(c); {
-	case cw >= 840:
-		return 3
-	case cw >= 560:
 		return 2
 	default:
 		return 1
@@ -312,18 +340,13 @@ func (a *app) content(c *ui.Context) {
 						})
 					}
 					switch a.section {
-					case "overview":
-						a.overviewSection(c)
-					case "translation":
-						a.translationSection(c)
-					case "screenshot":
-						a.screenshotSection(c)
-					case "launcher":
-						a.launcherSection(c)
 					case "ai":
 						a.aiSection(c)
 					case "settings":
 						a.settingsSection(c)
+					default:
+						// 截图、翻译、启动器不再有独立页面，所有配置收进功能中心卡片与弹窗。
+						a.overviewSection(c)
 					}
 				})
 			})
@@ -331,115 +354,124 @@ func (a *app) content(c *ui.Context) {
 	})
 }
 
-// ---------------- 概览 ----------------
+// ---------------- 功能中心 ----------------
 
 func (a *app) overviewSection(c *ui.Context) {
-	a.intro(c, "PLUGINS", "插件概览", "按需启用插件。关闭后隐藏对应 Tab，并注销插件快捷键。", nil)
-	cards := []struct {
-		iconName string
-		title    string
-		desc     string
-		on       *bool
-		kind     string
-	}{
-		{"translate", "划词翻译", "在任意应用中选中文本，通过快捷键打开翻译浮窗。",
-			&a.settings.TranslationEnabled, "translation"},
-		{"screenshot", "截图标注", "捕获当前屏幕，完成标注、复制和保存。",
-			&a.settings.ScreenshotEnabled, "screenshot"},
-		{"launcher", "快速启动", "按快捷键唤起搜索浮窗，打开应用和常用文件。",
-			&a.settings.LauncherEnabled, "launcher"},
+	a.intro(c, "TOOLBOX", "功能中心", "启动器是主入口：按快捷键唤起后，应用、文件、截图、翻译都能直接输入执行。", func() {
+		pill(c, a.launcherHotkeyStatus(), colAccentSoft, colAccentStr)
+	})
+	a.launcherHero(c)
+	if !a.settings.HasCompletedOnboarding {
+		a.welcomeCard(c)
 	}
+	a.homeFeaturesGroup(c)
+	a.homeCommandsSection(c)
+}
 
-	cols := a.overviewColumns(c)
-	if cols <= 1 {
-		ui.Column(c).Gap(14).Children(func() {
-			for _, card := range cards {
-				a.featureCard(c, card.iconName, card.title, card.desc, card.on, card.kind)
+// launcherHero 是功能中心最上面的主卡：直接给出唤起方式与入口按钮。
+func (a *app) launcherHero(c *ui.Context) {
+	hotkey := a.settings.Hotkeys.Launcher
+	keyCap := "未设置快捷键"
+	if hotkey != "" {
+		keyCap = formatHotkey(hotkey)
+	}
+	ui.Row(c).Gap(20).AlignItems(ui.Center).Padding(24, 26).Radius(19).Background(colCard).
+		Border(1, ui.RGBA(245, 158, 11, 0.28)).Shadow(0, 2, 12, 0, shadowCard).Children(func() {
+		iconTile(c, "launcher", 46, 13, colAccentSoft, colAccentStr)
+		ui.Column(c).Grow(1).MinWidth(0).Gap(6).Children(func() {
+			ui.Text(c, "启动器").FontSize(17).Bold()
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "任何时候按下").FontSize(12).TextColor(colTextMuted)
+				pill(c, keyCap, colBgSoft, colTextSoft)
+				ui.Text(c, "唤起搜索浮窗").FontSize(12).TextColor(colTextMuted)
+			})
+		})
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+			if hotkey == "" {
+				if secondaryBtn(c, "设置快捷键").Clicked() {
+					a.openConfigModal("launcher-hotkey")
+				}
+				return
+			}
+			if secondaryBtn(c, "调整").Clicked() {
+				a.openConfigModal("launcher-hotkey")
+			}
+			if primaryBtn(c, "打开启动器").Clicked() {
+				a.startLauncher()
 			}
 		})
+	})
+}
+
+// welcomeCard 只在首次启动时出现，说明主入口已经从主窗口换成了启动器。
+func (a *app) welcomeCard(c *ui.Context) {
+	ui.Row(c).Gap(20).AlignItems(ui.Center).Padding(22, 24).Radius(17).
+		Background(ui.RGBA(245, 158, 11, 0.08)).Border(1, ui.RGBA(245, 158, 11, 0.3)).Children(func() {
+		ui.Column(c).Grow(1).MinWidth(0).Gap(6).Children(func() {
+			ui.Text(c, "先按一次快捷键试试").FontSize(15).Bold()
+			ui.Text(c, "唤起浮窗后输入应用名或文件名回车打开；输入「reindex」等命令词可以执行内置命令。").
+				FontSize(12).TextColor(colTextSoft).MaxLines(2)
+		})
+		if secondaryBtn(c, "知道了").Clicked() {
+			a.settings.HasCompletedOnboarding = true
+			if err := a.persist(); err != nil {
+				a.toast("保存失败：" + err.Error())
+			}
+			a.refreshMain()
+		}
+	})
+}
+
+// ---------------- 配置弹窗 ----------------
+
+// configModalView 渲染配置弹窗。目前只剩启动器快捷键一种：划词翻译、
+// 截图标注的配置都在功能中心的抽屉里，不再用弹窗承载。
+func (a *app) configModalView(c *ui.Context) {
+	if a.configModal == "" {
 		return
 	}
-	for i := 0; i < len(cards); i += cols {
-		end := min(i+cols, len(cards))
-		ui.Row(c).Gap(14).AlignItems(ui.Stretch).Children(func() {
-			for j := i; j < end; j++ {
-				card := cards[j]
-				// Basis(0) 让同一行按 Grow 权重均分；否则 flex-basis 取内容宽度，
-				// 描述文案长短不同的卡片宽度会不一致，和下一行的卡片也对不齐。
-				a.featureCard(c, card.iconName, card.title, card.desc, card.on, card.kind).Basis(0).Grow(1)
-			}
-			for k := end - i; k < cols; k++ {
-				ui.Box(c).Basis(0).Grow(1)
-			}
-		})
-	}
-}
-
-func (a *app) featureCard(c *ui.Context, iconName, title, desc string, on *bool, kind string) ui.Element {
-	bc := colLine
-	ibg, ifg := colBgSoft, colTextSoft
-	if *on {
-		bc = ui.RGBA(245, 158, 11, 0.34)
-		ibg, ifg = colAccentSoft, colAccentStr
-	}
-	status := "默认关闭"
-	if *on {
-		status = "已开启"
-	}
-	return ui.Row(c).MinWidth(0).Gap(14).AlignItems(ui.Center).Padding(18).Radius(17).
-		Background(colCard).Border(1, bc).Shadow(0, 2, 12, 0, shadowCard).Children(func() {
-		iconTile(c, iconName, 42, 12, ibg, ifg)
-		ui.Column(c).Grow(1).MinWidth(0).Gap(4).Children(func() {
-			ui.Row(c).Gap(8).AlignItems(ui.Baseline).Children(func() {
-				ui.Text(c, title).FontSize(15).Bold()
-				ui.Text(c, status).FontSize(11).TextColor(colTextMuted)
-			})
-			ui.Text(c, desc).FontSize(12).TextColor(colTextMuted)
-		})
-		if ui.Switch(c, on).Label(title + "开关").Changed() {
-			a.afterFeatureChange(kind)
+	kind := a.configModal
+	open := true
+	ui.Modal(c, &open, func() {
+		if kind == "launcher-hotkey" {
+			a.launcherHotkeyModal(c)
 		}
 	})
 }
 
-// ---------------- 翻译 ----------------
-
-func (a *app) translationSection(c *ui.Context) {
-	enabled := 0
-	for _, p := range a.providers {
-		if p.Enabled && p.Configured {
-			enabled++
+// modalHeader 是配置弹窗共用的标题行（可关闭）。
+func (a *app) modalHeader(c *ui.Context, eyebrow, title string) {
+	ui.Row(c).AlignItems(ui.Center).Children(func() {
+		ui.Column(c).Grow(1).Gap(5).Children(func() {
+			ui.Text(c, eyebrow).FontSize(11).Bold().TextColor(colTextMuted).LetterSpacing(1.4)
+			ui.Text(c, title).FontSize(21).Bold()
+		})
+		closeBtn := ghostBtn(c, "").Label("关闭").Size(34, 34).Center()
+		closeBtn.Children(func() {
+			ui.Icon(c, icon("close")).FontSize(15).TextColor(colTextSoft)
+		})
+		if closeBtn.Clicked() {
+			a.configModal = ""
 		}
-	}
-	a.intro(c, "PROVIDERS", "划词翻译", "按需启用，可同时对照多个服务的结果。密钥仅保存在本机应用配置中。", func() {
-		pill(c, fmt.Sprintf("%d 个服务已启用", enabled), colAccentSoft, colAccentStr)
 	})
+}
 
-	// 只有 macOS 需要系统授权；Windows 读取选区走模拟 Ctrl+C，没有授权概念。
-	if runtime.GOOS == "darwin" {
-		a.permissionStrip(c, "辅助功能权限", "用于读取当前应用中被选中的文本。", "accessibility", permissions().Accessibility)
-	}
-
-	hotkeyBody := func() { a.hotkeyRecorder(c, "translate") }
-	langBody := func() { a.langSelect(c) }
-	if a.twoColumn(c) {
-		ui.Row(c).Gap(14).AlignItems(ui.Stretch).Children(func() {
-			a.settingsSection2(c, "keyboard", "翻译快捷键", "选中文本后按此组合键打开翻译浮窗。", hotkeyBody).Grow(1)
-			a.settingsSection2(c, "language", "翻译偏好", "“自动”会按选中文本是否含中文决定目标语言。", langBody).Grow(1)
-		})
-	} else {
-		ui.Column(c).Gap(14).Children(func() {
-			a.settingsSection2(c, "keyboard", "翻译快捷键", "选中文本后按此组合键打开翻译浮窗。", hotkeyBody)
-			a.settingsSection2(c, "language", "翻译偏好", "“自动”会按选中文本是否含中文决定目标语言。", langBody)
-		})
-	}
-
-	a.providerGrid(c)
+// launcherHotkeyModal 只放唤起快捷键的录制，从功能中心主卡的「调整」进入。
+func (a *app) launcherHotkeyModal(c *ui.Context) {
+	ui.Column(c).Width(540).Gap(16).Padding(4).Children(func() {
+		a.modalHeader(c, "LAUNCHER", "启动器快捷键")
+		a.hotkeyRecorder(c, "launcher")
+		ui.Text(c, "留空时不注册全局快捷键；录制后立即生效。").FontSize(12).TextColor(colTextMuted)
+	})
 }
 
 // providerGrid 按可用宽度把服务卡排成 3/2/1 列。
 func (a *app) providerGrid(c *ui.Context) {
-	cols := a.providerColumns(c)
+	a.providerGridCols(c, a.providerColumns(c))
+}
+
+// providerGridCols 按指定列数排布服务商卡片；弹窗里宽度固定，直接传列数。
+func (a *app) providerGridCols(c *ui.Context, cols int) {
 	if cols <= 1 {
 		ui.Column(c).Gap(14).Children(func() {
 			for i := range a.providers {
@@ -501,34 +533,6 @@ func (a *app) providerCard(c *ui.Context, i int) ui.Element {
 				a.openProvider(i)
 			}
 		})
-	})
-}
-
-// ---------------- 截图 ----------------
-
-func (a *app) screenshotSection(c *ui.Context) {
-	a.intro(c, "SCREENSHOT", "截图标注", "冻结当前屏幕，完成框选、标注、复制和保存。", nil)
-
-	// Windows 的屏幕捕获不需要授权。
-	if runtime.GOOS == "darwin" {
-		a.permissionStrip(c, "屏幕录制权限", "用于捕获当前显示器画面并进入标注编辑。", "screenRecording", permissions().ScreenRecording)
-	}
-
-	a.captureConfigPanel(c)
-}
-
-// captureConfigPanel 是截图页右侧的快捷键面板。
-func (a *app) captureConfigPanel(c *ui.Context) ui.Element {
-	return ui.Column(c).Padding(20).Radius(18).Gap(16).Background(colBgElevated).
-		Border(1, colLine).Children(func() {
-		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-			iconTile(c, "keyboard", 38, 11, ui.RGBA(82, 211, 154, 0.11), colSuccess)
-			ui.Column(c).Gap(3).Children(func() {
-				ui.Text(c, "截图快捷键").FontSize(13).Bold()
-				ui.Text(c, "按下快捷键即可进入截图模式").FontSize(11).TextColor(colTextMuted)
-			})
-		})
-		a.hotkeyRecorder(c, "screenshot")
 	})
 }
 
@@ -607,20 +611,6 @@ func (a *app) intro(c *ui.Context, eyebrow, title, desc string, right func()) {
 		if right != nil {
 			right()
 		}
-	})
-}
-
-func (a *app) settingsSection2(c *ui.Context, iconName, title, desc string, body func()) ui.Element {
-	return ui.Column(c).MinWidth(0).Padding(20).Radius(17).Background(colCard).
-		Border(1, colLine).Shadow(0, 2, 12, 0, shadowCard).Gap(18).Children(func() {
-		ui.Row(c).Gap(13).AlignItems(ui.Start).Children(func() {
-			iconTile(c, iconName, 38, 11, colBgSoft, colTextSoft)
-			ui.Column(c).Gap(3).Children(func() {
-				ui.Text(c, title).FontSize(16).Bold()
-				ui.Text(c, desc).FontSize(13).TextColor(colTextSoft)
-			})
-		})
-		body()
 	})
 }
 
@@ -757,20 +747,15 @@ func ghostBtn(c *ui.Context, label string) ui.Element {
 
 // ---------------- 动作 ----------------
 
+// visibleSections 返回侧栏导航。2.0 起六个页面恒显示：功能开关只决定能力，
+// 不再隐藏页面——关掉截图后 Tab 跟着消失的话，用户就找不到重新开启的入口了。
 func (a *app) visibleSections() []sectionItem {
-	items := []sectionItem{{"overview", "概览", "home"}}
-	if a.settings.TranslationEnabled {
-		items = append(items, sectionItem{"translation", "划词翻译", "translate"})
+	// 截图 / 翻译 / 启动器的配置全部收进功能中心，侧栏只留三个入口。
+	return []sectionItem{
+		{"overview", "功能中心", "home"},
+		{"ai", "AI供应商", "provider"},
+		{"settings", "设置", "settings"},
 	}
-	if a.settings.ScreenshotEnabled {
-		items = append(items, sectionItem{"screenshot", "截图标注", "screenshot"})
-	}
-	if a.settings.LauncherEnabled {
-		items = append(items, sectionItem{"launcher", "快速启动", "launcher"})
-	}
-	items = append(items, sectionItem{"ai", "AI供应商", "provider"})
-	items = append(items, sectionItem{"settings", "设置", "settings"})
-	return items
 }
 
 func (a *app) sectionVisible(id string) bool {
@@ -815,7 +800,7 @@ func (a *app) findHotkeyConflict(slot string) (string, bool) {
 	others := []struct{ slot, label string }{
 		{"translate", "划词翻译"},
 		{"screenshot", "截图标注"},
-		{"launcher", "快速启动"},
+		{"launcher", "启动器"},
 	}
 	for _, o := range others {
 		if o.slot == slot {
@@ -838,20 +823,12 @@ func (a *app) afterFeatureChange(kind string) {
 		return
 	}
 	a.registerHotkeys()
-	if kind == "launcher" && !a.settings.LauncherEnabled {
-		a.disposeLauncher()
-	}
-	if kind == "launcher" && a.settings.LauncherEnabled && a.settings.LauncherVSCodeEnabled {
-		a.detectVSCodeCommand()
-	}
 	label, on := a.featureMeta(kind)
 	switch {
-	case on && kind == "launcher" && a.settings.Hotkeys.Launcher == "":
-		a.toast(label + " 已开启，请到「启动」页录制快捷键")
 	case on:
 		a.toast(label + " 已开启")
 	default:
-		a.toast(label + " 已关闭")
+		a.toast(label + " 已关闭，快捷键一并注销")
 	}
 }
 
@@ -861,8 +838,6 @@ func (a *app) featureMeta(kind string) (string, bool) {
 		return "划词翻译", a.settings.TranslationEnabled
 	case "screenshot":
 		return "截图标注", a.settings.ScreenshotEnabled
-	case "launcher":
-		return "快速启动", a.settings.LauncherEnabled
 	}
 	return "", false
 }
@@ -877,7 +852,7 @@ func (a *app) afterProviderChange() {
 // mygo 的更新插件完成（updater/native），这里只负责发起。
 func (a *app) checkUpdate() {
 	if !a.updatesOn {
-		a.toast("开发构建不检查更新，请使用打包后的 App")
+		a.notify("开发构建不检查更新，请使用打包后的 App")
 		return
 	}
 	updater.CheckForUpdates()
@@ -932,7 +907,8 @@ func (a *app) registerHotkeys() {
 	if err := a.ensureHotkey("screenshot", a.settings.ScreenshotEnabled, a.settings.Hotkeys.Screenshot, a.startCapture); err != nil {
 		failed = append(failed, a.settings.Hotkeys.Screenshot)
 	}
-	if err := a.ensureHotkey("launcher", a.settings.LauncherEnabled, a.settings.Hotkeys.Launcher, a.startLauncher); err != nil {
+	// 启动器没有开关：它是主入口，快捷键始终注册。
+	if err := a.ensureHotkey("launcher", true, a.settings.Hotkeys.Launcher, a.startLauncher); err != nil {
 		failed = append(failed, a.settings.Hotkeys.Launcher)
 	}
 	if len(failed) > 0 {

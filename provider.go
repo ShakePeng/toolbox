@@ -56,6 +56,9 @@ func (d *providerDraft) credentials() map[string]string {
 }
 
 func (a *app) openProvider(i int) {
+	// 从翻译配置弹窗里点「配置」进来时先关掉弹窗，避免两层 Modal 叠在一起；
+	// 服务商编辑完保存/关闭后会回到功能中心。
+	a.configModal = ""
 	d := newDraft(i, a.providers[i])
 	if d.Kind == "openai-compatible" {
 		a.ensureDraftSupplier(d)

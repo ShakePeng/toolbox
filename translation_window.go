@@ -304,8 +304,8 @@ func (s *translationSession) refresh() {
 
 func (s *translationSession) openSettings() {
 	s.hide()
-	s.app.section = "translation"
-	s.app.showMain()
+	// 翻译配置收在功能中心的抽屉里，这里展开抽屉并唤起主窗口。
+	s.app.openFeatureDrawer("translate")
 }
 
 // ---------------- 高度估算 ----------------
@@ -567,7 +567,7 @@ func (s *translationSession) resultsSection(c *ui.Context) {
 			ui.Icon(c, icon("provider")).FontSize(20).TextColor(colTextMuted)
 			ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
 				ui.Text(c, "还没有可用的翻译服务").FontSize(14).TextColor(colText)
-				ui.Text(c, "先在翻译页中完成配置并启用服务。").FontSize(12).TextColor(colTextMuted)
+				ui.Text(c, "先在功能中心打开翻译设置并启用服务。").FontSize(12).TextColor(colTextMuted)
 			})
 			if ghostBtn(c, "去配置").Label("去配置").MinHeight(28).Clicked() {
 				s.openSettings()

@@ -10,7 +10,7 @@ import (
 
 // configSchemaVersion 是落盘配置的版本。迁移必须按版本逐级判断，
 // 不能只看“小于当前版本”，否则升级到 v3 会把 v2 用户的搜索源选择覆盖掉。
-const configSchemaVersion = 9
+const configSchemaVersion = 10
 
 // HotkeySettings 是各插件绑定的全局快捷键（accelerator 字符串）。
 type HotkeySettings struct {
@@ -26,7 +26,6 @@ type Settings struct {
 	Hotkeys             HotkeySettings `json:"hotkeys"`
 	TranslationEnabled  bool           `json:"translationEnabled"`
 	ScreenshotEnabled   bool           `json:"screenshotEnabled"`
-	LauncherEnabled     bool           `json:"launcherEnabled"`
 	LauncherSearchApps  bool           `json:"launcherSearchApps"`
 	LauncherSearchFiles bool           `json:"launcherSearchFiles"`
 	// LauncherVSCode 系列字段属于启动器的自定义命令。默认关闭，
@@ -106,22 +105,23 @@ const defaultOpenAIBaseURL = "https://api.openai.com/v1"
 // defaultHotkeys 按平台给出默认快捷键。
 // Windows/Linux 上 F1 和 Alt+D 是系统/浏览器常用键，注册成全局快捷键会
 // 抢走其他程序的输入，所以换成冲突更少的组合；macOS 保持原有默认值。
+// 启动器是主入口，默认就绑定一个键（⌥Space / Ctrl+Alt+Space）。
 func defaultHotkeys() HotkeySettings {
 	if runtime.GOOS == "darwin" {
-		return HotkeySettings{Translate: "Alt+D", Screenshot: "F1"}
+		return HotkeySettings{Translate: "Alt+D", Screenshot: "F1", Launcher: "Alt+Space"}
 	}
-	return HotkeySettings{Translate: "Ctrl+Alt+D", Screenshot: "Ctrl+Alt+S"}
+	return HotkeySettings{Translate: "Ctrl+Alt+D", Screenshot: "Ctrl+Alt+S", Launcher: "Ctrl+Alt+Space"}
 }
 
 func defaultSettings() Settings {
 	return Settings{
-		SchemaVersion:            configSchemaVersion,
-		Hotkeys:                  defaultHotkeys(),
-		TranslationEnabled:       false,
-		ScreenshotEnabled:        false,
-		LauncherEnabled:          false,
-		LauncherSearchApps:       true,
-		LauncherSearchFiles:      false,
+		SchemaVersion:      configSchemaVersion,
+		Hotkeys:            defaultHotkeys(),
+		TranslationEnabled: true,
+		ScreenshotEnabled:  true,
+		LauncherSearchApps: true,
+		// 启动器成了主入口，文件搜索默认打开，否则浮窗看起来只是个应用启动器。
+		LauncherSearchFiles:      true,
 		LauncherVSCodeEnabled:    false,
 		LauncherVSCodeCommand:    "code",
 		LauncherVSCodeFolders:    nil,
@@ -135,6 +135,7 @@ func defaultSettings() Settings {
 		LauncherWebSearchEngines: nil,
 		TargetLang:               "auto",
 		LaunchAtLogin:            false,
+		HasCompletedOnboarding:   false,
 	}
 }
 

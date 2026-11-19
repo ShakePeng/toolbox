@@ -77,19 +77,15 @@ func TestActivateProjectUsesForkLauncher(t *testing.T) {
 // Fork 配置完全独立：两个源的抽屉可以同时展开，键名不能冲突。
 func TestForkSettingsCard(t *testing.T) {
 	a := newTestApp()
-	a.settings.LauncherEnabled = true
 	a.settings.LauncherForkEnabled = true
 	a.settings.LauncherForkCommand = "fork"
 	a.settings.LauncherForkFolders = []string{"/repos"}
 
-	// Windows 字体行高比 macOS 大，760 高时 Fork 卡片刚好压在窗口底边外，
-	// 这里给足高度，避免测试因平台字体度量失败。
-	tt := ui.NewTester(a.view, 1080, 900)
-	if err := tt.Click("快速启动"); err != nil {
-		t.Fatalf("点击“快速启动”失败：%v", err)
-	}
+	// 启动项卡片收在功能中心、位于功能卡网格下方；Windows 字体行高更大，
+	// 这里给足高度，避免测试因平台字体度量把卡片挤出窗口。
+	tt := ui.NewTester(a.view, 1080, 1700)
 	if !tt.HasText("Fork 快速打开") {
-		t.Fatalf("启动项应显示 Fork 卡片，实际文本：%q", tt.Texts())
+		t.Fatalf("功能中心应显示 Fork 卡片，实际文本：%q", tt.Texts())
 	}
 	if err := tt.Click("展开或收起 Fork 快速打开"); err != nil {
 		t.Fatalf("展开 Fork 卡片失败：%v", err)

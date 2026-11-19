@@ -81,6 +81,16 @@ func migrateConfig(cfg *Config) {
 	if cfg.SchemaVersion < 9 {
 		migrateLegacyOpenAIProvider(cfg)
 	}
+	// v10 起启动器成为主入口：强制打开并补上默认快捷键，截图和翻译降级为
+	// 内置命令默认可用。老用户见过主界面，直接标记引导完成，不再弹功能中心。
+	if cfg.SchemaVersion < 10 {
+		if strings.TrimSpace(cfg.Settings.Hotkeys.Launcher) == "" {
+			cfg.Settings.Hotkeys.Launcher = defaultHotkeys().Launcher
+		}
+		cfg.Settings.TranslationEnabled = true
+		cfg.Settings.ScreenshotEnabled = true
+		cfg.Settings.HasCompletedOnboarding = true
+	}
 	cfg.SchemaVersion = configSchemaVersion
 	cfg.Settings.SchemaVersion = configSchemaVersion
 
@@ -90,6 +100,9 @@ func migrateConfig(cfg *Config) {
 	}
 	if cfg.Settings.Hotkeys.Screenshot == "" {
 		cfg.Settings.Hotkeys.Screenshot = defaults.Screenshot
+	}
+	if cfg.Settings.Hotkeys.Launcher == "" {
+		cfg.Settings.Hotkeys.Launcher = defaults.Launcher
 	}
 	if runtime.GOOS != "darwin" {
 		// 旧版录制器在 Windows/Linux 上会多写一个 Cmd（= Win 键），

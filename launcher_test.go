@@ -10,7 +10,6 @@ import (
 
 func newTestLauncherSession() (*launcherSession, *string, *string) {
 	a := newTestApp()
-	a.settings.LauncherEnabled = true
 	a.settings.LauncherSearchApps = true
 	a.settings.LauncherSearchFiles = true
 
@@ -96,8 +95,8 @@ func TestLauncherReindexCommand(t *testing.T) {
 	for _, q := range []string{"reindex", "REINDEX", "rei", "index", "重建", "索引"} {
 		s.query = q
 		s.rebuildResults()
-		if len(s.results) == 0 || s.results[0].kind != launcherKindAction || s.results[0].action != launcherActionReindex {
-			t.Fatalf("输入 %q 应模糊匹配到重建索引操作，实际 %+v", q, s.results)
+		if len(s.results) == 0 || s.results[0].kind != launcherKindCommand || s.results[0].command != cmdReindex {
+			t.Fatalf("输入 %q 应模糊匹配到重建索引命令，实际 %+v", q, s.results)
 		}
 	}
 
@@ -119,7 +118,7 @@ func TestLauncherReindexCommand(t *testing.T) {
 
 func TestLauncherEmptyQueryOnlyShowsSearch(t *testing.T) {
 	s, _, _ := newTestLauncherSession()
-	tt := ui.NewTester(s.view, launcherWidth, launcherHeaderHeight)
+	tt := ui.NewTester(s.view, launcherWidth, launcherHeaderHeight+launcherHintHeight)
 
 	if tt.HasText("Visual Studio Code") || tt.HasText("Code Runner") || tt.HasText("report.pdf") {
 		t.Errorf("空查询不应显示结果，实际文本：%q", tt.Texts())
@@ -127,12 +126,19 @@ func TestLauncherEmptyQueryOnlyShowsSearch(t *testing.T) {
 	if tt.HasText("↑↓ 选择 · ↵ 打开 · Esc 关闭") {
 		t.Errorf("空查询不应显示底部状态，实际文本：%q", tt.Texts())
 	}
+	// 启动器是主入口，空态要把「reindex」这类高频命令摆出来。
+	if !tt.HasText("reindex") {
+		t.Errorf("空查询应提示内置命令，实际文本：%q", tt.Texts())
+	}
+	if tt.HasText("退出") || tt.HasText("打开设置") {
+		t.Errorf("空态不应提示低频命令，实际文本：%q", tt.Texts())
+	}
 }
 
 func TestLauncherDesiredHeight(t *testing.T) {
 	s, _, _ := newTestLauncherSession()
-	if got := s.desiredHeight(); got != launcherHeaderHeight {
-		t.Errorf("空查询应只占搜索框高度，实际 %d", got)
+	if got, want := s.desiredHeight(), launcherHeaderHeight+launcherHintHeight; got != want {
+		t.Errorf("空查询应占搜索框加命令提示的高度 %d，实际 %d", want, got)
 	}
 
 	s.query = "x"
@@ -244,17 +250,28 @@ func TestLauncherDisabledSourcesHint(t *testing.T) {
 
 func TestLauncherSettingsPageHasNoSaveButton(t *testing.T) {
 	a := newTestApp()
-	a.settings.LauncherEnabled = true
-	tt := ui.NewTester(a.view, 980, 680)
+	tt := ui.NewTester(a.view, 980, 900)
 
-	if err := tt.Click("快速启动"); err != nil {
-		t.Fatalf("点击“启动”导航失败：%v", err)
-	}
-	if !tt.HasText("唤起快捷键") || !tt.HasText("启动项") {
-		t.Fatalf("启动页应显示快捷键和启动项，实际文本：%q", tt.Texts())
+	// 启动项卡片和唤起快捷键都收进功能中心，不再有独立启动器页。
+	for _, want := range []string{"应用搜索", "文件搜索", "网页搜索", "Fork 快速打开", "内置命令"} {
+		if !tt.HasText(want) {
+			t.Fatalf("功能中心应显示启动项 %q，实际文本：%q", want, tt.Texts())
+		}
 	}
 	if tt.HasText("保存启动器设置") {
-		t.Error("启动页不应显示保存按钮")
+		t.Error("启动器配置不应显示保存按钮")
+	}
+
+	// 「调整」打开启动器快捷键弹窗，同样没有保存按钮。
+	if err := tt.Click("调整"); err != nil {
+		t.Fatalf("点击“调整”失败：%v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("启动器快捷键") || !tt.HasText("快捷键") {
+		t.Fatalf("快捷键弹窗应显示录制控件，实际文本：%q", tt.Texts())
+	}
+	if tt.HasText("保存启动器设置") {
+		t.Error("快捷键弹窗不应显示保存按钮")
 	}
 }
 
@@ -383,7 +400,6 @@ func TestLauncherProjectModeEmptyHint(t *testing.T) {
 // 启动项开关打开但检测失败时，折叠状态也要能看到「未生效」。
 func TestLauncherSourceBadge(t *testing.T) {
 	a := newTestApp()
-	a.settings.LauncherEnabled = true
 	a.settings.LauncherForkEnabled = true
 	a.section = "launcher"
 	a.fork = forkState{checked: true, err: "未检测到 Fork，请确认已安装 Fork 应用"}
@@ -412,19 +428,16 @@ func TestLauncherSourceBadge(t *testing.T) {
 
 func TestLauncherVSCodeSettingsVisible(t *testing.T) {
 	a := newTestApp()
-	a.settings.LauncherEnabled = true
 	a.settings.LauncherVSCodeEnabled = true
 	a.settings.LauncherVSCodeCommand = "code"
 	a.settings.LauncherVSCodeFolders = []string{"/projects"}
 
-	tt := ui.NewTester(a.view, 1080, 760)
-	if err := tt.Click("快速启动"); err != nil {
-		t.Fatalf("点击“启动”失败：%v", err)
-	}
+	// 启动项卡片收在功能中心、位于功能卡网格下方，窗口要给足高度才点得到。
+	tt := ui.NewTester(a.view, 1080, 1700)
 	// 未展开时只显示标题行，配置内容收在抽屉里。
 	for _, want := range []string{"VS Code 快速打开", "应用搜索", "文件搜索"} {
 		if !tt.HasText(want) {
-			t.Errorf("启动项列表应显示 %q，实际文本：%q", want, tt.Texts())
+			t.Errorf("功能中心应显示 %q，实际文本：%q", want, tt.Texts())
 		}
 	}
 	if tt.HasText("项目文件夹") {
@@ -441,6 +454,39 @@ func TestLauncherVSCodeSettingsVisible(t *testing.T) {
 		}
 	}
 	if tt.HasText("保存启动器设置") {
-		t.Error("启动页不应显示保存按钮")
+		t.Error("启动器配置不应显示保存按钮")
+	}
+}
+
+// 功能中心的「内置命令」默认收起，点标题行展开只读命令说明。
+func TestHomeCommandsSectionExpand(t *testing.T) {
+	a := newTestApp()
+	// 欢迎卡文案里也提到命令，先完成引导收掉它，避免干扰断言。
+	a.settings.HasCompletedOnboarding = true
+	tt := ui.NewTester(a.view, 1080, 1400)
+
+	if !tt.HasText("内置命令") {
+		t.Fatalf("功能中心应有内置命令小节，实际文本：%q", tt.Texts())
+	}
+	if tt.HasText("重新枚举已安装应用并重建文件索引") {
+		t.Error("默认应收起命令列表")
+	}
+	if err := tt.Click("展开或收起 内置命令"); err != nil {
+		t.Fatalf("展开内置命令失败：%v", err)
+	}
+	tt.Frame()
+	for _, want := range []string{"重新枚举已安装应用并重建文件索引", "从 GitHub Release 检查并安装新版本", "关闭应用，截图与翻译快捷键随之停止"} {
+		if !tt.HasText(want) {
+			t.Errorf("展开后应显示 %q，实际文本：%q", want, tt.Texts())
+		}
+	}
+
+	// 再点一次收起。
+	if err := tt.Click("展开或收起 内置命令"); err != nil {
+		t.Fatalf("收起内置命令失败：%v", err)
+	}
+	tt.Frame()
+	if tt.HasText("重新枚举已安装应用并重建文件索引") {
+		t.Error("收起后不应显示命令列表")
 	}
 }

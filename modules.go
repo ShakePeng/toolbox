@@ -10,6 +10,7 @@ import (
 	"image/png"
 	"log"
 	"runtime"
+	"strings"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/plugins/permissionflow"
@@ -54,20 +55,37 @@ func permissions() PermissionStatus {
 	}
 }
 
-// startTranslation 读取当前应用的选中文本，并发请求各服务，展示翻译浮窗。
-func (a *app) startTranslation() {
-	if !a.settings.TranslationEnabled {
-		a.translationNotice("划词翻译未开启，请先在概览中打开", false)
+// translationUnavailable 返回翻译不可用的原因，空字符串表示可用。
+// translateClipboard 翻译剪贴板内容，供功能中心按钮使用。
+// 必须在点击/回车这类事件路径上调用：读剪贴板要求应用已 ready。
+func (a *app) translateClipboard() {
+	if reason := a.translationUnavailable(); reason != "" {
+		a.translationNotice(reason, false)
 		return
 	}
+	a.translateText(mygo.Clipboard.ReadText())
+}
+
+func (a *app) translationUnavailable() string {
+	if a == nil || !a.settings.TranslationEnabled {
+		return "划词翻译未开启，请先在功能中心打开"
+	}
 	if len(translationProviders(a.resolvedProviders())) == 0 {
-		a.translationNotice("请先在翻译页配置并启用至少一个翻译服务", false)
+		return "请先在功能中心配置并启用至少一个翻译服务"
+	}
+	return ""
+}
+
+// startTranslation 是全局快捷键与托盘入口：读取当前应用的选中文本再翻译。
+func (a *app) startTranslation() {
+	if reason := a.translationUnavailable(); reason != "" {
+		a.translationNotice(reason, false)
 		return
 	}
 	// macOS 的选区读取依赖辅助功能；没有权限时直接提示，避免 AX 返回难懂的错误码。
 	// Windows 走模拟 Ctrl+C，不需要授权。
 	if runtime.GOOS == "darwin" && !permissionflow.Allowed(permissionflow.Accessibility) {
-		a.translationNotice("需要辅助功能权限才能读取选中文本，请到翻译页授权", true)
+		a.translationNotice("需要辅助功能权限才能读取选中文本，请到翻译设置中授权", true)
 		return
 	}
 	text, err := readSelectedText()
@@ -78,7 +96,18 @@ func (a *app) startTranslation() {
 		return
 	}
 	log.Printf("%s: 划词翻译，%d 个字符", appName, len(text))
+	a.translateText(text)
+}
 
+// translateText 是所有入口的统一出口：全局快捷键传入选区文本，功能中心的
+// 「翻译剪贴板」按钮传入剪贴板内容。
+func (a *app) translateText(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		// 没拿到文本不算失败：打开浮窗的编辑态，让用户直接输入。
+		a.translationNotice("没有可翻译的文字，直接在这里输入要翻译的内容", true)
+		return
+	}
 	target := resolveTargetLang(a.settings.TargetLang, text)
 	if a.trans == nil {
 		a.trans = newTranslationSession(a)

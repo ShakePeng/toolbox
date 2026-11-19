@@ -16,10 +16,12 @@ const (
 	launcherKindFile
 	launcherKindDir
 	launcherKindProject
-	// launcherKindAction 是命令触发的操作行（如重建索引），不对应文件或应用。
+	// launcherKindAction 是命令触发的操作行（如进入项目模式），不对应文件或应用。
 	launcherKindAction
 	// launcherKindSearch 是网页搜索的入口行。
 	launcherKindSearch
+	// launcherKindCommand 是内置命令行，直接执行截图、翻译等动作。
+	launcherKindCommand
 )
 
 // launcherAction 是操作行要执行的动作。
@@ -27,7 +29,6 @@ type launcherAction uint8
 
 const (
 	launcherActionNone launcherAction = iota
-	launcherActionReindex
 	// launcherActionProject 进入某个项目源的项目模式。
 	launcherActionProject
 	// launcherActionWebSearch 进入某个搜索引擎的搜索模式。
@@ -43,8 +44,11 @@ type launcherItem struct {
 	app      mygo.InstalledApp
 	score    int
 	action   launcherAction
-	// project 是项目提示行对应的源 id（vscode / fork）。
+	// project 是项目 / 搜索提示行对应的源 id（vscode / fork / 搜索引擎）。
 	project string
+	// command 非空表示这是一条内置命令行，arg 是命令名之后输入的文字。
+	command builtinCommandID
+	arg     string
 }
 
 func (k launcherKind) label() string {
@@ -59,6 +63,8 @@ func (k launcherKind) label() string {
 		return "操作"
 	case launcherKindSearch:
 		return "搜索"
+	case launcherKindCommand:
+		return "命令"
 	default:
 		return "文件"
 	}

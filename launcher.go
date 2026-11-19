@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"runtime"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -24,6 +25,8 @@ const (
 	launcherListPadding  = 16
 	launcherEmptyHeight  = 92
 	launcherNoticeHeight = 48
+	// launcherHintHeight 是空查询时那一行命令提示的高度。
+	launcherHintHeight = 44
 )
 
 // launcherSession 复用一个置顶浮窗，首次唤起时创建。所有可变字段只在
@@ -90,7 +93,7 @@ func newLauncherSession(a *app) *launcherSession {
 		iconSem:           make(chan struct{}, launcherIconConcurrency),
 	}
 	s.win = mygo.NewWindow(mygo.WindowOptions{
-		Title:             "快速启动",
+		Title:             "启动器",
 		Width:             launcherWidth,
 		Height:            launcherHeight,
 		Hidden:            true,
@@ -337,14 +340,8 @@ func (s *launcherSession) launcherActions() []launcherItem {
 		return nil
 	}
 	var items []launcherItem
-	if builtinCommandMatches(q) {
-		items = append(items, launcherItem{
-			kind:     launcherKindAction,
-			action:   launcherActionReindex,
-			title:    "重建索引",
-			subtitle: "重新枚举已安装应用并重建文件索引",
-			path:     "launcher-action-reindex",
-		})
+	if cmd, arg, ok := matchBuiltinCommand(q); ok {
+		items = append(items, s.builtinItem(cmd, arg))
 	}
 	// 已经输入空格时由 projectQuery 负责项目模式，这里只提示触发词本身。
 	if strings.ContainsAny(s.query, " \t") {
@@ -381,11 +378,47 @@ func (s *launcherSession) launcherActions() []launcherItem {
 	return items
 }
 
-// desiredHeight 让浮窗跟着结果数量伸缩：空查询只剩搜索框，一两条结果就
-// 只占一两行，结果多时封顶在当前尺寸，超出的部分由 Scroll 承接。
+// builtinItem 把命中的命令渲染成一行结果，标题带上用户已输入的参数。
+func (s *launcherSession) builtinItem(cmd builtinCommand, arg string) launcherItem {
+	title := cmd.Title
+	if arg != "" {
+		title = cmd.Names[0] + " " + arg
+	}
+	return launcherItem{
+		kind:     launcherKindCommand,
+		command:  cmd.ID,
+		arg:      arg,
+		title:    title,
+		subtitle: cmd.Desc,
+		// 结果行用 path 当 UI key，命令行必须给一个稳定且唯一的值。
+		path: "cmd-" + string(cmd.ID),
+	}
+}
+
+// runBuiltin 执行一条内置命令。KeepOpen 的命令（重建索引）跑完保留浮窗，
+// 其余命令执行后隐藏。
+func (s *launcherSession) runBuiltin(item launcherItem) {
+	cmd, ok := lookupBuiltinCommand(item.command)
+	if !ok {
+		return
+	}
+	if err := cmd.Run(s, item.arg); err != nil {
+		s.notice = err.Error()
+		s.fitHeight()
+		s.refresh()
+		return
+	}
+	if !cmd.KeepOpen {
+		s.hide()
+	}
+}
+
+// desiredHeight 让浮窗跟着结果数量伸缩：空查询只占搜索框加一行命令提示，
+// 一两条结果就只占一两行，结果多时封顶在当前尺寸，超出的部分由 Scroll 承接。
 func (s *launcherSession) desiredHeight() int {
 	if strings.TrimSpace(s.query) == "" {
-		return launcherHeaderHeight
+		// 启动器是主入口，空态给出几条常用命令，光一个搜索框太没有线索。
+		return launcherHeaderHeight + launcherHintHeight
 	}
 	h := launcherHeaderHeight + launcherFooterHeight
 	if s.notice != "" {
@@ -459,6 +492,10 @@ func (s *launcherSession) activate(i int) {
 		return
 	}
 	item := s.results[i]
+	if item.kind == launcherKindCommand {
+		s.runBuiltin(item)
+		return
+	}
 	if item.kind == launcherKindSearch {
 		if item.path != "" {
 			if s.openSearch == nil {
@@ -479,8 +516,6 @@ func (s *launcherSession) activate(i int) {
 	}
 	if item.kind == launcherKindAction {
 		switch item.action {
-		case launcherActionReindex:
-			s.runReindexCommand()
 		case launcherActionProject:
 			// 补全成完整触发词 + 空格。直接改绑定值时光标会停在输入长度处，
 			// 所以递增 inputSeq 重建输入框，让光标落在补全后的末尾。
@@ -542,8 +577,10 @@ func (s *launcherSession) view(c *ui.Context) {
 		ui.Column(c).Fill().Radius(launcherCornerRadius).
 			Gradient(ui.Hex("#2b2c30"), ui.Hex("#202124"), 180).Children(func() {
 			s.header(c)
-			// 没有输入时只保留搜索框，不展示结果和底部状态。
-			if strings.TrimSpace(s.query) != "" {
+			// 没有输入时只保留搜索框加一行命令提示，不展示结果列表和底部状态。
+			if strings.TrimSpace(s.query) == "" {
+				s.commandHintRow(c)
+			} else {
 				s.body(c)
 				s.footer(c)
 			}
@@ -597,6 +634,20 @@ func (s *launcherSession) body(c *ui.Context) {
 				s.resultRow(c, i)
 			}
 		})
+	})
+}
+
+// commandHintRow 在空查询时列出几条常用命令。它们只是提示，不参与选中，
+// 免得用户刚打开浮窗按回车就误触发命令。
+func (s *launcherSession) commandHintRow(c *ui.Context) {
+	ui.Row(c).Padding(0, 14).Gap(8).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, "试试").FontSize(11).TextColor(colTextMuted)
+		for _, cmd := range builtinCommandTable() {
+			if cmd.Hidden {
+				continue
+			}
+			pill(c, cmd.Names[0], colBgSoft, colTextSoft)
+		}
 	})
 }
 
@@ -689,6 +740,14 @@ func (s *launcherSession) resultRow(c *ui.Context, i int) {
 }
 
 func (s *launcherSession) itemIcon(c *ui.Context, item launcherItem) {
+	if item.kind == launcherKindCommand {
+		if cmd, ok := lookupBuiltinCommand(item.command); ok {
+			iconTile(c, cmd.Icon, 28, 8, colAccentSoft, colAccentStr)
+			return
+		}
+		iconTile(c, "launcher", 28, 8, colBgSoft, colTextSoft)
+		return
+	}
 	if item.kind == launcherKindSearch {
 		iconTile(c, "language", 28, 8, colAccentSoft, colAccentStr)
 		return
@@ -734,9 +793,11 @@ func (s *launcherSession) footer(c *ui.Context) {
 		hint := "↑↓ 选择 · ↵ 打开 · Esc 关闭"
 		if src, _, ok := s.projectQuery(); ok {
 			hint = "↑↓ 选择 · ↵ 用 " + src.label + " 打开 · Esc 关闭"
-		} else if s.selected < len(s.results) &&
-			(s.results[s.selected].kind == launcherKindAction || s.results[s.selected].kind == launcherKindSearch) {
-			hint = "↵ 执行 · Esc 关闭"
+		} else if s.selected < len(s.results) {
+			sel := s.results[s.selected]
+			if sel.kind == launcherKindCommand || sel.kind == launcherKindAction || sel.kind == launcherKindSearch {
+				hint = "↵ 执行 · Esc 关闭"
+			}
 		}
 		ui.Text(c, hint).FontSize(11).TextColor(colTextMuted).MaxLines(1)
 		ui.Spacer(c)
@@ -787,17 +848,21 @@ func (s *launcherSession) statusLine() string {
 
 // ---------------- 主窗口启动页 ----------------
 
+// startLauncher 唤起启动器浮窗。启动器是主入口，不再受 LauncherEnabled
+// 控制——用户已经用全局快捷键或托盘点到这里，拒绝打开只会显得坏掉。
 func (a *app) startLauncher() {
-	if !a.settings.LauncherEnabled {
-		a.section = "overview"
-		a.showMain()
-		a.toast("快速启动未开启，请先在概览中打开")
-		return
-	}
 	if a.launcher == nil {
 		a.launcher = newLauncherSession(a)
 	}
 	a.launcher.toggle()
+}
+
+// showLauncher 幂等地打开启动器（第二次启动应用时用它，不能把已开的浮窗关掉）。
+func (a *app) showLauncher() {
+	if a.launcher == nil {
+		a.launcher = newLauncherSession(a)
+	}
+	a.launcher.show()
 }
 
 func (a *app) disposeLauncher() {
@@ -808,81 +873,139 @@ func (a *app) disposeLauncher() {
 	a.launcher = nil
 }
 
-func (a *app) launcherSection(c *ui.Context) {
-	a.intro(c, "LAUNCHER", "快速启动",
-		"按快捷键唤起搜索浮窗，打开已安装应用与常用目录中的文件。", func() {
-			pill(c, a.launcherHotkeyStatus(), colAccentSoft, colAccentStr)
+// homeFeaturesGroup 是功能中心的功能与启动项卡片区。划词翻译、截图标注
+// 与六个启动项每项一张可展开的卡片（复用 launcherSourceItem），点标题行
+// 展开抽屉，开关独立切换。
+func (a *app) homeFeaturesGroup(c *ui.Context) {
+	ui.Column(c).Gap(10).Children(func() {
+		// 划词翻译：快捷键、目标语言、系统权限和服务商都收在抽屉里。
+		a.launcherSourceItem(c, "translate", "划词翻译", "在任意应用选中文本按快捷键读取，或用启动器命令翻译剪贴板。", &a.settings.TranslationEnabled, func() {
+			if !a.settings.TranslationEnabled {
+				ui.Text(c, "开启后按快捷键划词翻译，也可以点下面的「翻译剪贴板」直接翻译。").
+					FontSize(12).TextColor(colTextMuted)
+				return
+			}
+			ui.Column(c).Gap(16).Children(func() {
+				a.hotkeyRecorder(c, "translate")
+				a.langSelect(c)
+				// 只有 macOS 需要系统授权；Windows 读取选区走模拟 Ctrl+C，没有授权概念。
+				if runtime.GOOS == "darwin" {
+					a.permissionStrip(c, "辅助功能权限", "用于读取当前应用中被选中的文本。", "accessibility", permissions().Accessibility)
+				}
+				a.providerGrid(c)
+				if primaryBtn(c, "翻译剪贴板").Clicked() {
+					a.translateClipboard()
+				}
+			})
 		})
-
-	hotkeyBody := func() {
-		a.hotkeyRecorder(c, "launcher")
-	}
-	a.settingsSection2(c, "keyboard", "唤起快捷键", "留空时不注册，录制后立即生效。", hotkeyBody)
-
-	a.settingsSection2(c, "launcher", "启动项", "点击卡片展开或收起配置，开关可独立切换。", func() {
-		ui.Column(c).Gap(10).Children(func() {
-			a.launcherSourceItem(c, "apps", "应用搜索", "搜索已安装应用", &a.settings.LauncherSearchApps, func() {
-				ui.Column(c).Gap(7).Children(func() {
-					ui.Text(c, "从系统已安装应用中检索，结果显示真实图标。").
-						FontSize(12).TextColor(colTextSoft)
-					ui.Text(c, a.launcherAppStatus()).FontSize(11).TextColor(colTextMuted).MaxLines(2)
+		// 截图标注：快捷键与屏幕录制权限收在抽屉里。
+		a.launcherSourceItem(c, "screenshot", "截图标注", "冻结整屏后框选，支持矩形、箭头、文字和马赛克标注。", &a.settings.ScreenshotEnabled, func() {
+			if !a.settings.ScreenshotEnabled {
+				ui.Text(c, "开启后按快捷键进入截图标注。").
+					FontSize(12).TextColor(colTextMuted)
+				return
+			}
+			ui.Column(c).Gap(16).Children(func() {
+				a.hotkeyRecorder(c, "screenshot")
+				// Windows 的屏幕捕获不需要授权。
+				if runtime.GOOS == "darwin" {
+					a.permissionStrip(c, "屏幕录制权限", "用于捕获当前显示器画面并进入标注编辑。", "screenRecording", permissions().ScreenRecording)
+				}
+				if primaryBtn(c, "立即截图").Clicked() {
+					a.startCapture()
+				}
+			})
+		})
+		a.launcherSourceItem(c, "apps", "应用搜索", "搜索已安装应用", &a.settings.LauncherSearchApps, func() {
+			ui.Column(c).Gap(7).Children(func() {
+				ui.Text(c, "从系统已安装应用中检索，结果显示真实图标。").
+					FontSize(12).TextColor(colTextSoft)
+				ui.Text(c, a.launcherAppStatus()).FontSize(11).TextColor(colTextMuted).MaxLines(2)
+			})
+		})
+		a.launcherSourceItem(c, "files", "文件搜索", "搜索桌面、下载、文档和主目录浅层", &a.settings.LauncherSearchFiles, func() {
+			ui.Column(c).Gap(7).Children(func() {
+				ui.Text(c, "文件索引在首次唤起时建立，覆盖常用目录，不做全盘搜索。").
+					FontSize(12).TextColor(colTextSoft)
+				ui.Text(c, a.launcherFileStatus()).FontSize(11).TextColor(colTextMuted).MaxLines(2)
+			})
+		})
+		a.launcherSourceItem(c, "websearch", "网页搜索", "配置触发词和搜索地址，输入触发词 + 空格搜索网页", &a.settings.LauncherWebSearchEnabled, func() {
+			if a.settings.LauncherWebSearchEnabled {
+				a.webSearchSettings(c)
+				return
+			}
+			ui.Text(c, "开启后可添加多个搜索引擎，默认提供百度、Google、Bing，也可以自定义。").
+				FontSize(12).TextColor(colTextMuted)
+		})
+		a.launcherSourceItem(c, "vscode", "VS Code 快速打开", "输入触发词 + 空格，快速打开项目", &a.settings.LauncherVSCodeEnabled, func() {
+			if a.settings.LauncherVSCodeEnabled {
+				ui.Column(c).Gap(16).Children(func() {
+					a.vscodeCommandRow(c)
+					a.vscodeFolderSection(c)
 				})
-			})
-			a.launcherSourceItem(c, "files", "文件搜索", "搜索桌面、下载、文档和主目录浅层", &a.settings.LauncherSearchFiles, func() {
-				ui.Column(c).Gap(7).Children(func() {
-					ui.Text(c, "文件索引在首次唤起时建立，覆盖常用目录，不做全盘搜索。").
-						FontSize(12).TextColor(colTextSoft)
-					ui.Text(c, a.launcherFileStatus()).FontSize(11).TextColor(colTextMuted).MaxLines(2)
+				return
+			}
+			ui.Text(c, "开启后配置命令和项目文件夹，首次开启会自动检测 VS Code。").
+				FontSize(12).TextColor(colTextMuted)
+		})
+		a.launcherSourceItem(c, "trae", "Trae 快速打开", "输入触发词 + 空格，快速打开项目", &a.settings.LauncherTraeEnabled, func() {
+			if a.settings.LauncherTraeEnabled {
+				ui.Column(c).Gap(16).Children(func() {
+					a.traeCommandRow(c)
+					a.traeFolderSection(c)
 				})
-			})
-			a.launcherSourceItem(c, "websearch", "网页搜索", "配置触发词和搜索地址，输入触发词 + 空格搜索网页", &a.settings.LauncherWebSearchEnabled, func() {
-				if a.settings.LauncherWebSearchEnabled {
-					a.webSearchSettings(c)
-					return
-				}
-				ui.Text(c, "开启后可添加多个搜索引擎，默认提供百度、Google、Bing，也可以自定义。").
-					FontSize(12).TextColor(colTextMuted)
-			})
-			a.launcherSourceItem(c, "vscode", "VS Code 快速打开", "输入触发词 + 空格，快速打开项目", &a.settings.LauncherVSCodeEnabled, func() {
-				if a.settings.LauncherVSCodeEnabled {
-					ui.Column(c).Gap(16).Children(func() {
-						a.vscodeCommandRow(c)
-						a.vscodeFolderSection(c)
-					})
-					return
-				}
-				ui.Text(c, "开启后配置命令和项目文件夹，首次开启会自动检测 VS Code。").
-					FontSize(12).TextColor(colTextMuted)
-			})
-			a.launcherSourceItem(c, "trae", "Trae 快速打开", "输入触发词 + 空格，快速打开项目", &a.settings.LauncherTraeEnabled, func() {
-				if a.settings.LauncherTraeEnabled {
-					ui.Column(c).Gap(16).Children(func() {
-						a.traeCommandRow(c)
-						a.traeFolderSection(c)
-					})
-					return
-				}
-				ui.Text(c, "开启后配置命令和项目文件夹，首次开启会自动检测 Trae。").
-					FontSize(12).TextColor(colTextMuted)
-			})
-			a.launcherSourceItem(c, "fork", "Fork 快速打开", "输入触发词 + 空格，用 Fork 打开 Git 仓库", &a.settings.LauncherForkEnabled, func() {
-				if a.settings.LauncherForkEnabled {
-					ui.Column(c).Gap(16).Children(func() {
-						a.forkCommandRow(c)
-						a.forkFolderSection(c)
-					})
-					return
-				}
-				ui.Text(c, "开启后配置命令和项目文件夹；Fork 只能打开 Git 仓库，列表只列含 .git 的目录。").
-					FontSize(12).TextColor(colTextMuted)
-			})
+				return
+			}
+			ui.Text(c, "开启后配置命令和项目文件夹，首次开启会自动检测 Trae。").
+				FontSize(12).TextColor(colTextMuted)
+		})
+		a.launcherSourceItem(c, "fork", "Fork 快速打开", "输入触发词 + 空格，用 Fork 打开 Git 仓库", &a.settings.LauncherForkEnabled, func() {
+			if a.settings.LauncherForkEnabled {
+				ui.Column(c).Gap(16).Children(func() {
+					a.forkCommandRow(c)
+					a.forkFolderSection(c)
+				})
+				return
+			}
+			ui.Text(c, "开启后配置命令和项目文件夹；Fork 只能打开 Git 仓库，列表只列含 .git 的目录。").
+				FontSize(12).TextColor(colTextMuted)
 		})
 	})
+}
 
-	a.settingsSection2(c, "code", "内置命令", "在快速启动浮窗中输入后回车执行，命令固定，不可修改。", func() {
-		ui.Column(c).Gap(8).Children(func() {
-			builtinCommandRow(c, []string{reindexCommand, "重建索引"}, "重建应用与文件索引，两种写法等效")
+// homeCommandsSection 是功能中心里「内置命令」的折叠小节：默认收起，
+// 点标题行展开只读的命令说明，平时不占版面。
+func (a *app) homeCommandsSection(c *ui.Context) {
+	expanded := a.homeCommandsExpanded
+	bg, border := colCard, colLine
+	if expanded {
+		bg, border = ui.Hex("#26272b"), colLineStrong
+	}
+	ui.Column(c.Key("home-commands")).Radius(12).Background(bg).
+		Border(1, border).Shadow(0, 2, 12, 0, shadowCard).Children(func() {
+		header := ui.Row(c).Padding(14, 16).Gap(12).AlignItems(ui.Center)
+		header.Label("展开或收起 内置命令")
+		header.Children(func() {
+			iconTile(c, "code", 30, 9, colBgSoft, colTextSoft)
+			ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
+				ui.Text(c, "内置命令").FontSize(13).Bold()
+				ui.Text(c, "在启动器浮窗中输入后回车执行；命令固定，不可修改。").
+					FontSize(11).TextColor(colTextMuted).MaxLines(1)
+			})
+			ui.Icon(c, icon("chevron-down")).FontSize(16).TextColor(colTextMuted).
+				Rotate(map[bool]float32{true: 180}[expanded])
 		})
+		if header.Clicked() {
+			a.homeCommandsExpanded = !a.homeCommandsExpanded
+		}
+		if expanded {
+			ui.Column(c).Padding(0, 16, 16, 16).Gap(8).Children(func() {
+				for _, cmd := range builtinCommandTable() {
+					builtinCommandRow(c, cmd.Names, cmd.Desc)
+				}
+			})
+		}
 	})
 }
 
@@ -917,6 +1040,22 @@ var launcherToolIcons = map[string]ui.ImageSource{
 // tone 决定颜色：muted 中性、warn 待配置、danger 不可用。
 func (a *app) launcherSourceBadge(id string) (text, tone string) {
 	switch id {
+	case "translate":
+		if !a.settings.TranslationEnabled {
+			return "", ""
+		}
+		if len(translationProviders(a.resolvedProviders())) == 0 {
+			return "未配置服务", "warn"
+		}
+		return "", ""
+	case "screenshot":
+		if !a.settings.ScreenshotEnabled {
+			return "", ""
+		}
+		if !screenRecordingGranted() {
+			return "缺少屏幕录制权限", "warn"
+		}
+		return "", ""
 	case "websearch":
 		if !a.settings.LauncherWebSearchEnabled {
 			return "", ""
@@ -984,6 +1123,10 @@ func (a *app) launcherSourceItem(c *ui.Context, id, title, desc string, on *bool
 			} else {
 				iconName := "app"
 				switch id {
+				case "translate":
+					iconName = "translate"
+				case "screenshot":
+					iconName = "screenshot"
 				case "files":
 					iconName = "file"
 				case "websearch":
@@ -1010,6 +1153,10 @@ func (a *app) launcherSourceItem(c *ui.Context, id, title, desc string, on *bool
 			})
 			if ui.Switch(c, on).Label(title + "开关").Changed() {
 				switch id {
+				case "translate":
+					a.afterFeatureChange("translate")
+				case "screenshot":
+					a.afterFeatureChange("screenshot")
 				case "vscode":
 					a.afterVSCodeToggle()
 				case "trae":

@@ -200,7 +200,6 @@ func TestAISupplierNavAlwaysVisible(t *testing.T) {
 	a := newTestApp()
 	a.settings.TranslationEnabled = false
 	a.settings.ScreenshotEnabled = false
-	a.settings.LauncherEnabled = false
 	tt := ui.NewTester(a.view, 1080, 800)
 	tt.Frame()
 	if !tt.HasText("AI供应商") {

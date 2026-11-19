@@ -23,13 +23,13 @@ func newTestApp() *app {
 	return a
 }
 
-// 侧栏导航可在概览与设置之间切换，并显示对应内容。
+// 侧栏导航可在功能中心与设置之间切换，并显示对应内容。
 func TestNavigation(t *testing.T) {
 	a := newTestApp()
 	tt := ui.NewTester(a.view, 980, 680)
 
-	if !tt.HasText("插件概览") {
-		t.Fatalf("首屏应显示概览，实际文本：%q", tt.Texts())
+	if !tt.HasText("功能中心") {
+		t.Fatalf("首屏应显示功能中心，实际文本：%q", tt.Texts())
 	}
 	if err := tt.Click("设置"); err != nil {
 		t.Fatalf("点击“设置”导航失败：%v", err)
@@ -40,40 +40,52 @@ func TestNavigation(t *testing.T) {
 	if tt.HasText("保存设置") {
 		t.Error("设置页不应再显示“保存设置”按钮")
 	}
-	if err := tt.Click("概览"); err != nil {
-		t.Fatalf("点击“概览”导航失败：%v", err)
+	if err := tt.Click("功能中心"); err != nil {
+		t.Fatalf("点击“功能中心”导航失败：%v", err)
 	}
-	if !tt.HasText("插件概览") {
-		t.Errorf("应回到概览页，实际文本：%q", tt.Texts())
+	if !tt.HasText("功能中心") {
+		t.Errorf("应回到功能中心，实际文本：%q", tt.Texts())
 	}
 }
 
 func TestManualSaveButtonsRemoved(t *testing.T) {
 	a := newTestApp()
-	tt := ui.NewTester(a.view, 980, 680)
+	// 翻译抽屉展开后内容较长，把截图卡挤到窗口下方，给足高度再点。
+	tt := ui.NewTester(a.view, 980, 1300)
 
-	if err := tt.Click("划词翻译"); err != nil {
+	// 翻译和截图没有独立页面了，配置收在功能中心的抽屉里。
+	if err := tt.Click("展开或收起 划词翻译"); err != nil {
 		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("默认目标语言") {
+		t.Fatalf("翻译抽屉应显示目标语言设置，实际文本：%q", tt.Texts())
 	}
 	if tt.HasText("保存翻译设置") {
-		t.Error("翻译页不应再显示“保存翻译设置”按钮")
+		t.Error("翻译配置不应再显示“保存翻译设置”按钮")
 	}
-	if err := tt.Click("截图标注"); err != nil {
+	if err := tt.Click("展开或收起 截图标注"); err != nil {
 		t.Fatal(err)
 	}
+	tt.Frame()
+	if !tt.HasText("快捷键") {
+		t.Fatalf("截图抽屉应显示快捷键设置，实际文本：%q", tt.Texts())
+	}
 	if tt.HasText("保存截图设置") {
-		t.Error("截图页不应再显示“保存截图设置”按钮")
+		t.Error("截图配置不应再显示“保存截图设置”按钮")
 	}
 }
 
 func TestLanguageSelectionPersists(t *testing.T) {
 	a := newTestApp()
 	a.configPath = filepath.Join(t.TempDir(), "config.json")
-	tt := ui.NewTester(a.view, 980, 680)
+	tt := ui.NewTester(a.view, 980, 900)
 
-	if err := tt.Click("划词翻译"); err != nil {
+	// 目标语言下拉收在划词翻译抽屉里。
+	if err := tt.Click("展开或收起 划词翻译"); err != nil {
 		t.Fatal(err)
 	}
+	tt.Frame()
 	if err := tt.Click("自动判断"); err != nil {
 		t.Fatal(err)
 	}
@@ -124,16 +136,17 @@ func TestRefreshTrayShortcuts(t *testing.T) {
 	}
 }
 
-// 翻译页展示 Provider 卡片，点击“配置”打开编辑弹窗并显示对应字段。
+// 翻译抽屉里展示 Provider 卡片，点击“配置”打开编辑弹窗并显示对应字段。
 func TestProviderModal(t *testing.T) {
 	a := newTestApp()
-	tt := ui.NewTester(a.view, 980, 680)
+	tt := ui.NewTester(a.view, 980, 900)
 
-	if err := tt.Click("划词翻译"); err != nil {
-		t.Fatalf("点击“翻译”导航失败：%v", err)
+	if err := tt.Click("展开或收起 划词翻译"); err != nil {
+		t.Fatalf("展开翻译抽屉失败：%v", err)
 	}
+	tt.Frame()
 	if !tt.HasText("百度翻译") {
-		t.Fatalf("翻译页应显示 Provider 卡片，实际文本：%q", tt.Texts())
+		t.Fatalf("翻译抽屉应显示 Provider 卡片，实际文本：%q", tt.Texts())
 	}
 	if err := tt.Click("百度翻译配置"); err != nil {
 		t.Fatalf("点击“配置”失败：%v", err)
@@ -148,6 +161,8 @@ func TestProviderModal(t *testing.T) {
 	if err := tt.Click("关闭"); err != nil {
 		t.Fatal(err)
 	}
+	// 编辑弹窗关闭后翻译抽屉仍在展开状态，直接配 Google。
+	tt.Frame()
 	if err := tt.Click("Google 翻译配置"); err != nil {
 		t.Fatal(err)
 	}
@@ -259,23 +274,26 @@ func TestLangMapping(t *testing.T) {
 	}
 }
 
-// 启动器默认关闭，快捷键留空，搜索源只默认开启应用搜索。
+// 启动器是主入口：默认开启、默认带快捷键，三个功能全部默认可用。
 func TestLauncherDefaults(t *testing.T) {
 	cfg := defaultConfig()
 	if cfg.SchemaVersion != configSchemaVersion || cfg.Settings.SchemaVersion != configSchemaVersion {
 		t.Errorf("默认配置应为 v%d，实际 %d / %d", configSchemaVersion, cfg.SchemaVersion, cfg.Settings.SchemaVersion)
 	}
-	if cfg.Settings.LauncherEnabled {
-		t.Error("启动器应默认关闭")
+	if cfg.Settings.Hotkeys.Launcher != defaultHotkeys().Launcher {
+		t.Errorf("启动器快捷键应为 %q，实际 %q", defaultHotkeys().Launcher, cfg.Settings.Hotkeys.Launcher)
 	}
-	if cfg.Settings.Hotkeys.Launcher != "" {
-		t.Errorf("启动器快捷键应默认留空，实际 %q", cfg.Settings.Hotkeys.Launcher)
+	if !cfg.Settings.TranslationEnabled || !cfg.Settings.ScreenshotEnabled {
+		t.Error("截图和翻译模块应默认开启")
+	}
+	if cfg.Settings.HasCompletedOnboarding {
+		t.Error("新装用户应默认未完成引导")
 	}
 	if !cfg.Settings.LauncherSearchApps {
 		t.Error("应用搜索应默认开启")
 	}
-	if cfg.Settings.LauncherSearchFiles {
-		t.Error("文件搜索应默认关闭")
+	if !cfg.Settings.LauncherSearchFiles {
+		t.Error("文件搜索应默认开启")
 	}
 	if cfg.Settings.LauncherVSCodeEnabled {
 		t.Error("VSCode 快速打开应默认关闭")
@@ -288,12 +306,12 @@ func TestLauncherDefaults(t *testing.T) {
 	}
 }
 
-// v1 配置没有启动器字段：迁移补搜索源默认值，但不能动快捷键和插件开关。
+// v1 配置没有启动器字段：迁移补搜索源默认值，并在 v10 里把启动器强制打开、
+// 补上默认唤起快捷键（2.0 起它是主入口）。
 func TestMigrateLauncherFromV1(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.SchemaVersion = 1
 	cfg.Settings.SchemaVersion = 1
-	cfg.Settings.LauncherEnabled = false
 	cfg.Settings.LauncherSearchApps = false
 	cfg.Settings.LauncherSearchFiles = false
 	cfg.Settings.Hotkeys.Launcher = ""
@@ -303,11 +321,11 @@ func TestMigrateLauncherFromV1(t *testing.T) {
 	if !cfg.Settings.LauncherSearchApps || !cfg.Settings.LauncherSearchFiles {
 		t.Error("v1 迁移后搜索源应默认开启")
 	}
-	if cfg.Settings.LauncherEnabled {
-		t.Error("v1 迁移不应改变启动器开关")
+	if cfg.Settings.Hotkeys.Launcher != defaultHotkeys().Launcher {
+		t.Errorf("v10 迁移应补上启动器快捷键，实际 %q", cfg.Settings.Hotkeys.Launcher)
 	}
-	if cfg.Settings.Hotkeys.Launcher != "" {
-		t.Errorf("迁移不应给启动器快捷键填默认值，实际 %q", cfg.Settings.Hotkeys.Launcher)
+	if !cfg.Settings.HasCompletedOnboarding {
+		t.Error("老用户升级后不应再弹首次引导")
 	}
 	if cfg.Settings.LauncherVSCodeEnabled {
 		t.Error("v1 迁移不应开启 VSCode 快速打开")
@@ -435,5 +453,53 @@ func TestFindHotkeyConflict(t *testing.T) {
 	a.settings.Hotkeys.Launcher = ""
 	if _, ok := a.findHotkeyConflict("launcher"); ok {
 		t.Error("空快捷键不应参与冲突检测")
+	}
+}
+
+// 主窗口只在首次运行且非登录拉起时自动出现，其余情况都只驻留托盘。
+func TestShouldShowMainOnLaunch(t *testing.T) {
+	s := defaultSettings()
+	if !shouldShowMainOnLaunch(false, s) {
+		t.Error("首次全新启动应显示功能中心引导")
+	}
+	s.HasCompletedOnboarding = true
+	if shouldShowMainOnLaunch(false, s) {
+		t.Error("已完成引导的普通启动不应弹出主窗口")
+	}
+	if shouldShowMainOnLaunch(true, defaultSettings()) {
+		t.Error("登录拉起只驻留托盘，不应弹出主窗口")
+	}
+}
+
+// 功能中心要把启动器摆在最前面；划词翻译、截图标注与启动项一样是可展开
+// 的卡片，AI 供应商与应用更新卡片已移除（各自的入口在侧栏和设置页）。
+func TestOverviewShowsLauncherHero(t *testing.T) {
+	a := newTestApp()
+	a.settings.HasCompletedOnboarding = true
+	a.settings.Hotkeys.Launcher = "Alt+Space"
+	tt := ui.NewTester(a.view, 1100, 900)
+
+	for _, want := range []string{"功能中心", "启动器是主入口", "打开启动器", "划词翻译", "截图标注", "展开或收起 划词翻译", "展开或收起 截图标注"} {
+		if !tt.HasText(want) {
+			t.Errorf("功能中心应显示 %q，实际文本：%q", want, tt.Texts())
+		}
+	}
+	if tt.HasText("知道了") {
+		t.Error("已完成引导时不应再显示首次引导卡")
+	}
+	if tt.HasText("AI 供应商") || tt.HasText("应用与更新") {
+		t.Errorf("功能中心不应再显示 AI 供应商 / 应用与更新卡片，实际文本：%q", tt.Texts())
+	}
+}
+
+// 没设置启动器快捷键时，功能区要给出录入入口而不是一个空胶囊。
+func TestLauncherHeroPromptsHotkey(t *testing.T) {
+	a := newTestApp()
+	a.settings.HasCompletedOnboarding = true
+	a.settings.Hotkeys.Launcher = ""
+	tt := ui.NewTester(a.view, 1100, 760)
+
+	if !tt.HasText("设置快捷键") {
+		t.Errorf("未设置快捷键时应提示录入，实际文本：%q", tt.Texts())
 	}
 }
