@@ -25,8 +25,6 @@ const (
 	launcherListPadding  = 16
 	launcherEmptyHeight  = 92
 	launcherNoticeHeight = 48
-	// launcherHintHeight 是空查询时那一行命令提示的高度。
-	launcherHintHeight = 44
 )
 
 // launcherSession 复用一个置顶浮窗，首次唤起时创建。所有可变字段只在
@@ -413,12 +411,11 @@ func (s *launcherSession) runBuiltin(item launcherItem) {
 	}
 }
 
-// desiredHeight 让浮窗跟着结果数量伸缩：空查询只占搜索框加一行命令提示，
+// desiredHeight 让浮窗跟着结果数量伸缩：空查询只占搜索框，
 // 一两条结果就只占一两行，结果多时封顶在当前尺寸，超出的部分由 Scroll 承接。
 func (s *launcherSession) desiredHeight() int {
 	if strings.TrimSpace(s.query) == "" {
-		// 启动器是主入口，空态给出几条常用命令，光一个搜索框太没有线索。
-		return launcherHeaderHeight + launcherHintHeight
+		return launcherHeaderHeight
 	}
 	h := launcherHeaderHeight + launcherFooterHeight
 	if s.notice != "" {
@@ -577,10 +574,8 @@ func (s *launcherSession) view(c *ui.Context) {
 		ui.Column(c).Fill().Radius(launcherCornerRadius).
 			Gradient(ui.Hex("#2b2c30"), ui.Hex("#202124"), 180).Children(func() {
 			s.header(c)
-			// 没有输入时只保留搜索框加一行命令提示，不展示结果列表和底部状态。
-			if strings.TrimSpace(s.query) == "" {
-				s.commandHintRow(c)
-			} else {
+			// 没有输入时只保留搜索框，不展示结果列表、命令提示和底部状态。
+			if strings.TrimSpace(s.query) != "" {
 				s.body(c)
 				s.footer(c)
 			}
@@ -634,20 +629,6 @@ func (s *launcherSession) body(c *ui.Context) {
 				s.resultRow(c, i)
 			}
 		})
-	})
-}
-
-// commandHintRow 在空查询时列出几条常用命令。它们只是提示，不参与选中，
-// 免得用户刚打开浮窗按回车就误触发命令。
-func (s *launcherSession) commandHintRow(c *ui.Context) {
-	ui.Row(c).Padding(0, 14).Gap(8).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "试试").FontSize(11).TextColor(colTextMuted)
-		for _, cmd := range builtinCommandTable() {
-			if cmd.Hidden {
-				continue
-			}
-			pill(c, cmd.Names[0], colBgSoft, colTextSoft)
-		}
 	})
 }
 

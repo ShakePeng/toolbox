@@ -102,23 +102,3 @@ func TestBuiltinCommandBlocksTriggerWord(t *testing.T) {
 		t.Errorf("正常触发词不应报冲突，实际 %q", got)
 	}
 }
-
-// 空态命令提示只放高频命令，退出/设置这类低频命令不该占位置。
-func TestLauncherEmptyStateHintsBuiltinCommands(t *testing.T) {
-	visible := []builtinCommandID{}
-	for _, cmd := range builtinCommandTable() {
-		if !cmd.Hidden {
-			visible = append(visible, cmd.ID)
-		}
-	}
-	want := []builtinCommandID{cmdReindex}
-	if len(visible) != len(want) {
-		t.Fatalf("空态应只提示 %d 条命令，实际 %v", len(want), visible)
-	}
-	for i := range want {
-		if visible[i] != want[i] {
-			t.Errorf("空态命令顺序应为 %v，实际 %v", want, visible)
-			break
-		}
-	}
-}

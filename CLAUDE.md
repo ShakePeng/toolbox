@@ -153,7 +153,7 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 ### 快速启动（`launcher*.go`）
 
 - 启动器是主入口，不可关闭；快捷键默认 `Option+Space`（macOS）/ `Ctrl+Alt+Space`（Windows），`ensureHotkey` 对空值跳过注册，注册失败只 toast，功能中心用状态徽标提示。
-- 复用一个置顶浮窗（宽 640，高度 111–540 自适应）：空查询显示搜索框 + 一行命令提示（`commandHintRow`，只放未标 `Hidden` 的命令），有结果时按行数增高，最多 8 行；`desiredHeight` 与 `view` 必须同步改，否则提示行会被裁掉。`show` 重置查询、聚焦无边框的 `TextInputBase`；`OnTextKey` 处理 `↑/↓/Enter/Esc`。`ui.TextKey` 只在回调期间有效，**不能保存**。焦点离开输入框后，根视图用 `c.Shortcut(0, ui.KeyEscape)` 兜底关闭。
+- 复用一个置顶浮窗（宽 640，高度 67–540 自适应）：空查询只显示搜索框，有结果时按行数增高，最多 8 行；`desiredHeight` 与 `view` 必须同步改，否则结果行会被裁掉。`show` 重置查询、聚焦无边框的 `TextInputBase`；`OnTextKey` 处理 `↑/↓/Enter/Esc`。`ui.TextKey` 只在回调期间有效，**不能保存**。焦点离开输入框后，根视图用 `c.Shortcut(0, ui.KeyEscape)` 兜底关闭。
 - 失焦自动隐藏；刚 `Show` 的 150ms 内忽略失焦；因失焦隐藏后的 250ms 内吞掉一次 toggle，避免快捷键先触发失焦、回调又把窗口弹回来。
 - Windows 11 会给 `Panel` 圆角窗口描一圈 DWM 边框；UI 若再画 `Border` 就会看到两条平行边框。`hideNativeWindowBorder`（`launcher_border_windows.go`）用 `DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE` 去掉原生描边，创建窗口和 `Show` 后各调用一次。翻译浮窗使用同一处理。
 - 应用列表由 `Shell.InstalledApps()` 在后台 goroutine 枚举；文件索引在首次唤起时后台构建。两者都通过 `win.Update` 回主线程，并用 `gen` 丢弃重建前的旧结果。
@@ -172,7 +172,7 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 
 ### 内置命令（`launcher_commands.go`）
 
-- `builtinCommandTable()` 是唯一声明处，搜索匹配（`matchBuiltinCommand`）、结果行渲染、`activate` 分发、功能中心的内置命令折叠小节、空态提示都只读这张表，新增命令不要再加第六处 switch。
+- `builtinCommandTable()` 是唯一声明处，搜索匹配（`matchBuiltinCommand`）、结果行渲染、`activate` 分发、功能中心的内置命令折叠小节都只读这张表，新增命令不要再加第六处 switch。
 - 截图、翻译不是内置命令，只走快捷键/托盘；功能模块的开关也不再影响命令匹配。
 - `Run` 返回 error 时写入 `s.notice`。
 - 有参数时命令词只允许前缀匹配，无参数时允许子串匹配（`rei`/`重建` 都能命中重建索引），少于 2 个 rune 不提示；`isBuiltinCommand` 只做精确匹配，供网页搜索/项目触发词的冲突校验用。

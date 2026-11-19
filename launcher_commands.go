@@ -33,8 +33,6 @@ type builtinCommand struct {
 
 	// KeepOpen 执行后保留浮窗（如重建索引，跑完还要继续搜）。
 	KeepOpen bool
-	// Hidden 表示不进入空态的命令提示，只在真正输入时才匹配到。
-	Hidden bool
 }
 
 // builtinCommandTable 返回全部内置命令。顺序决定同名命中时的优先级。
@@ -53,7 +51,6 @@ func builtinCommandTable() []builtinCommand {
 		{
 			ID: cmdAI, Names: []string{"ai", "供应商", "AI供应商"},
 			Title: "AI 供应商", Desc: "管理 OpenAI 兼容的供应商与模型", Icon: "provider",
-			Hidden:   true,
 			Keywords: []string{"supplier", "模型"},
 			Run: func(s *launcherSession, arg string) error {
 				s.app.openSection("ai")
@@ -63,7 +60,6 @@ func builtinCommandTable() []builtinCommand {
 		{
 			ID: cmdSettings, Names: []string{"设置", "settings", "preferences"},
 			Title: "打开设置", Desc: "快捷键、开机自启与应用行为", Icon: "settings",
-			Hidden:   true,
 			Keywords: []string{"option", "偏好"},
 			Run: func(s *launcherSession, arg string) error {
 				s.app.openSection("settings")
@@ -73,7 +69,6 @@ func builtinCommandTable() []builtinCommand {
 		{
 			ID: cmdUpdate, Names: []string{"更新", "update", "检查更新"},
 			Title: "检查更新", Desc: "从 GitHub Release 检查并安装新版本", Icon: "shield",
-			Hidden:   true,
 			Keywords: []string{"upgrade", "升级", "version"},
 			Run: func(s *launcherSession, arg string) error {
 				s.app.checkUpdate()
@@ -83,7 +78,6 @@ func builtinCommandTable() []builtinCommand {
 		{
 			ID: cmdQuit, Names: []string{"退出", "quit", "exit"},
 			Title: "退出 Toolbox", Desc: "关闭应用，截图与翻译快捷键随之停止", Icon: "close",
-			Hidden:   true,
 			Keywords: []string{"关闭", "bye"},
 			Run: func(s *launcherSession, arg string) error {
 				mygo.App.Quit()

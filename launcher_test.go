@@ -118,7 +118,7 @@ func TestLauncherReindexCommand(t *testing.T) {
 
 func TestLauncherEmptyQueryOnlyShowsSearch(t *testing.T) {
 	s, _, _ := newTestLauncherSession()
-	tt := ui.NewTester(s.view, launcherWidth, launcherHeaderHeight+launcherHintHeight)
+	tt := ui.NewTester(s.view, launcherWidth, launcherHeaderHeight)
 
 	if tt.HasText("Visual Studio Code") || tt.HasText("Code Runner") || tt.HasText("report.pdf") {
 		t.Errorf("空查询不应显示结果，实际文本：%q", tt.Texts())
@@ -126,9 +126,9 @@ func TestLauncherEmptyQueryOnlyShowsSearch(t *testing.T) {
 	if tt.HasText("↑↓ 选择 · ↵ 打开 · Esc 关闭") {
 		t.Errorf("空查询不应显示底部状态，实际文本：%q", tt.Texts())
 	}
-	// 启动器是主入口，空态要把「reindex」这类高频命令摆出来。
-	if !tt.HasText("reindex") {
-		t.Errorf("空查询应提示内置命令，实际文本：%q", tt.Texts())
+	// 空查询只保留搜索框，不给命令提示。
+	if tt.HasText("试试") || tt.HasText("reindex") {
+		t.Errorf("空查询不应提示内置命令，实际文本：%q", tt.Texts())
 	}
 	if tt.HasText("退出") || tt.HasText("打开设置") {
 		t.Errorf("空态不应提示低频命令，实际文本：%q", tt.Texts())
@@ -137,8 +137,8 @@ func TestLauncherEmptyQueryOnlyShowsSearch(t *testing.T) {
 
 func TestLauncherDesiredHeight(t *testing.T) {
 	s, _, _ := newTestLauncherSession()
-	if got, want := s.desiredHeight(), launcherHeaderHeight+launcherHintHeight; got != want {
-		t.Errorf("空查询应占搜索框加命令提示的高度 %d，实际 %d", want, got)
+	if got, want := s.desiredHeight(), launcherHeaderHeight; got != want {
+		t.Errorf("空查询应只占搜索框高度 %d，实际 %d", want, got)
 	}
 
 	s.query = "x"
