@@ -305,7 +305,7 @@ func (s *translationSession) refresh() {
 func (s *translationSession) openSettings() {
 	s.hide()
 	// 翻译配置收在功能中心的抽屉里，这里展开抽屉并唤起主窗口。
-	s.app.openFeatureDrawer("translate")
+	s.app.openFeatureModal("translate")
 }
 
 // ---------------- 高度估算 ----------------

@@ -149,7 +149,7 @@ func (a *app) providerModal(c *ui.Context) {
 	}
 	d := a.draft
 	open := true
-	ui.Modal(c, &open, func() {
+	body := func() {
 		// Modal 自带面板背景和圆角，这里只排内容，避免再画一层卡片形成双层遮罩。
 		ui.Column(c).Width(540).Gap(18).Padding(4).Children(func() {
 			// 头部
@@ -219,7 +219,13 @@ func (a *app) providerModal(c *ui.Context) {
 				})
 			})
 		})
-	})
+	}
+	// 从功能设置弹框里点开的供应商编辑要跟着走浅色，白底上不能再叠一层黑。
+	if a.featureModal != "" {
+		lightModal(c, &open, body)
+	} else {
+		ui.Modal(c, &open, body)
+	}
 	if !open {
 		a.closeProvider()
 	}

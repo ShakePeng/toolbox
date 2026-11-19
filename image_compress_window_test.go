@@ -190,7 +190,7 @@ func TestImageCompressFeatureCardAndCommandSwitch(t *testing.T) {
 	a.settings.HasCompletedOnboarding = true
 	tt := ui.NewTester(a.view, 1100, 1200)
 	tt.Frame()
-	for _, text := range []string{"图片压缩", "图片压缩开关", "展开或收起 图片压缩"} {
+	for _, text := range []string{"图片压缩", "图片压缩开关", "图片压缩设置"} {
 		if !tt.HasText(text) {
 			t.Errorf("功能中心缺少 %q：%q", text, tt.Texts())
 		}

@@ -35,8 +35,9 @@ type app struct {
 	// configModal 表示功能配置弹窗打开的类型：translate / screenshot / launcher-hotkey，
 	// 空串表示没有打开。截图和翻译不再有独立页面，配置都收进弹窗。
 	configModal string
-	// launcherSourceExpanded 只保存展开中的启动项，关闭设置页时也保留。
-	launcherSourceExpanded string
+	// featureModal 是功能中心里打开设置弹框的功能 id（translate / screenshot 等），
+	// 空串表示没有弹框；配置不再内联展开，全部收进弹框。
+	featureModal string
 	// homeCommandsExpanded 控制功能中心「内置命令」折叠小节的展开状态。
 	homeCommandsExpanded bool
 
@@ -95,11 +96,11 @@ func (a *app) openConfigModal(kind string) {
 	a.refreshMain()
 }
 
-// openFeatureDrawer 展开功能中心里某个功能（划词翻译、截图标注）的配置
-// 抽屉并唤起主窗口。翻译浮窗的「打开设置」走这里。
-func (a *app) openFeatureDrawer(id string) {
+// openFeatureModal 打开功能中心里某个功能（划词翻译、截图标注等）的设置
+// 弹框并唤起主窗口。翻译浮窗的「打开设置」走这里。
+func (a *app) openFeatureModal(id string) {
 	a.configModal = ""
-	a.launcherSourceExpanded = id
+	a.featureModal = id
 	a.section = "overview"
 	a.showMain()
 	a.refreshMain()
@@ -220,6 +221,9 @@ func (a *app) view(c *ui.Context) {
 					ui.Text(c, a.toastMsg).FontSize(12).TextColor(colText)
 				})
 			}
+			// 弹框都挂在根视图上，后面的画在上层：功能设置弹框可能再打开
+			// 供应商编辑弹框，所以它要排在 providerModal 前面。
+			a.featureModalView(c)
 			a.providerModal(c)
 			a.aiSupplierModal(c)
 			a.configModalView(c)
@@ -366,8 +370,9 @@ func (a *app) overviewSection(c *ui.Context) {
 	if !a.settings.HasCompletedOnboarding {
 		a.welcomeCard(c)
 	}
-	a.homeFeaturesGroup(c)
+	// 内置命令放在功能卡片上方：命令是启动器的固定入口，比逐个功能的开关更常看。
 	a.homeCommandsSection(c)
+	a.homeFeaturesGroup(c)
 }
 
 // launcherHero 是功能中心最上面的主卡：直接给出唤起方式与入口按钮。
@@ -426,15 +431,26 @@ func (a *app) welcomeCard(c *ui.Context) {
 
 // ---------------- 配置弹窗 ----------------
 
-// configModalView 渲染配置弹窗。目前只剩启动器快捷键一种：划词翻译、
-// 截图标注的配置都在功能中心的抽屉里，不再用弹窗承载。
+// lightModal 画一个浅色弹框：主窗口固定深色，设置弹框再用深色就跟页面
+// 糊在一起，所以弹框单独走浅色主题，并临时把全局色板换成浅色，
+// 让和页面共用的按钮、权限条、Provider 卡片也跟着变浅。
+func lightModal(c *ui.Context, open *bool, body func()) {
+	restore := withLightPalette()
+	defer restore()
+	ui.Themed(c, sToolsLightTheme()).Children(func() {
+		ui.Modal(c, open, body)
+	})
+}
+
+// configModalView 渲染配置弹窗。目前只剩启动器快捷键一种：各功能的设置
+// 走 featureModalView 的功能弹框。
 func (a *app) configModalView(c *ui.Context) {
 	if a.configModal == "" {
 		return
 	}
 	kind := a.configModal
 	open := true
-	ui.Modal(c, &open, func() {
+	lightModal(c, &open, func() {
 		if kind == "launcher-hotkey" {
 			a.launcherHotkeyModal(c)
 		}

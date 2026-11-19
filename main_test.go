@@ -50,26 +50,30 @@ func TestNavigation(t *testing.T) {
 
 func TestManualSaveButtonsRemoved(t *testing.T) {
 	a := newTestApp()
-	// 翻译抽屉展开后内容较长，把截图卡挤到窗口下方，给足高度再点。
 	tt := ui.NewTester(a.view, 980, 1300)
 
-	// 翻译和截图没有独立页面了，配置收在功能中心的抽屉里。
-	if err := tt.Click("展开或收起 划词翻译"); err != nil {
+	// 翻译和截图没有独立页面了，配置收在功能中心的设置弹框里。
+	if err := tt.Click("划词翻译设置"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 	if !tt.HasText("默认目标语言") {
-		t.Fatalf("翻译抽屉应显示目标语言设置，实际文本：%q", tt.Texts())
+		t.Fatalf("翻译设置弹框应显示目标语言设置，实际文本：%q", tt.Texts())
 	}
 	if tt.HasText("保存翻译设置") {
 		t.Error("翻译配置不应再显示“保存翻译设置”按钮")
 	}
-	if err := tt.Click("展开或收起 截图标注"); err != nil {
+	// 弹框是模态的，先关掉才能点到另一张卡片的齿轮。
+	if err := tt.Click("关闭 划词翻译"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("截图标注设置"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 	if !tt.HasText("快捷键") {
-		t.Fatalf("截图抽屉应显示快捷键设置，实际文本：%q", tt.Texts())
+		t.Fatalf("截图设置弹框应显示快捷键设置，实际文本：%q", tt.Texts())
 	}
 	if tt.HasText("保存截图设置") {
 		t.Error("截图配置不应再显示“保存截图设置”按钮")
@@ -82,7 +86,7 @@ func TestLanguageSelectionPersists(t *testing.T) {
 	tt := ui.NewTester(a.view, 980, 900)
 
 	// 目标语言下拉收在划词翻译抽屉里。
-	if err := tt.Click("展开或收起 划词翻译"); err != nil {
+	if err := tt.Click("划词翻译设置"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -141,7 +145,7 @@ func TestProviderModal(t *testing.T) {
 	a := newTestApp()
 	tt := ui.NewTester(a.view, 980, 900)
 
-	if err := tt.Click("展开或收起 划词翻译"); err != nil {
+	if err := tt.Click("划词翻译设置"); err != nil {
 		t.Fatalf("展开翻译抽屉失败：%v", err)
 	}
 	tt.Frame()
@@ -479,7 +483,7 @@ func TestOverviewShowsLauncherHero(t *testing.T) {
 	a.settings.Hotkeys.Launcher = "Alt+Space"
 	tt := ui.NewTester(a.view, 1100, 900)
 
-	for _, want := range []string{"功能中心", "启动器是主入口", "打开启动器", "划词翻译", "截图标注", "展开或收起 划词翻译", "展开或收起 截图标注"} {
+	for _, want := range []string{"功能中心", "启动器是主入口", "打开启动器", "划词翻译", "截图标注", "划词翻译设置", "截图标注设置"} {
 		if !tt.HasText(want) {
 			t.Errorf("功能中心应显示 %q，实际文本：%q", want, tt.Texts())
 		}

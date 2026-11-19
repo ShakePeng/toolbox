@@ -434,7 +434,7 @@ func TestLauncherVSCodeSettingsVisible(t *testing.T) {
 
 	// 启动项卡片收在功能中心、位于功能卡网格下方，窗口要给足高度才点得到。
 	tt := ui.NewTester(a.view, 1080, 1700)
-	// 未展开时只显示标题行，配置内容收在抽屉里。
+	// 卡片上只有齿轮和开关，配置内容收在弹框里。
 	for _, want := range []string{"VS Code 快速打开", "应用搜索", "文件搜索"} {
 		if !tt.HasText(want) {
 			t.Errorf("功能中心应显示 %q，实际文本：%q", want, tt.Texts())
@@ -444,8 +444,8 @@ func TestLauncherVSCodeSettingsVisible(t *testing.T) {
 		t.Errorf("未展开时不应显示 VSCode 配置，实际文本：%q", tt.Texts())
 	}
 
-	// 点击整行展开抽屉，露出命令与项目文件夹配置。
-	if err := tt.Click("展开或收起 VS Code 快速打开"); err != nil {
+	// 点齿轮打开设置弹框，露出命令与项目文件夹配置。
+	if err := tt.Click("VS Code 快速打开设置"); err != nil {
 		t.Fatalf("点击 VSCode 启动项行失败：%v", err)
 	}
 	for _, want := range []string{"触发词", "项目文件夹", "/projects"} {

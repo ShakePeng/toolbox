@@ -854,130 +854,273 @@ func (a *app) disposeLauncher() {
 	a.launcher = nil
 }
 
-// homeFeaturesGroup 是功能中心的功能与启动项卡片区。划词翻译、截图标注
-// 与六个启动项每项一张可展开的卡片（复用 launcherSourceItem），点标题行
-// 展开抽屉，开关独立切换。
+// homeFeature 是功能中心两列卡片里的一项。status 只给没有配置项的卡片用
+// （应用搜索、文件搜索），把加载/索引状态常显在描述下一行。
+type homeFeature struct {
+	id, title, desc, status string
+	on                      *bool
+	hasSettings             bool
+}
+
+// homeFeaturesGroup 是功能中心的功能与启动项卡片区：一行两张卡片，每张卡片
+// 只有标题、描述和右侧的齿轮 + 开关。配置内容不再内联展开，点齿轮开弹框，
+// 版面因此短一半，窗口窄时也只需要降列。
 func (a *app) homeFeaturesGroup(c *ui.Context) {
+	features := []homeFeature{
+		{id: "translate", title: "划词翻译", desc: "在任意应用选中文本按快捷键读取，也可翻译剪贴板。", on: &a.settings.TranslationEnabled, hasSettings: true},
+		{id: "screenshot", title: "截图标注", desc: "冻结整屏后框选，支持矩形、箭头、文字和马赛克。", on: &a.settings.ScreenshotEnabled, hasSettings: true},
+		{id: "image-compress", title: "图片压缩", desc: "批量压缩 PNG / JPEG / WebP，支持本地与 TinyPNG 云。", on: &a.settings.ImageCompress.Enabled, hasSettings: true},
+		{id: "websearch", title: "网页搜索", desc: "输入触发词 + 空格，用配置的搜索引擎搜网页。", on: &a.settings.LauncherWebSearchEnabled, hasSettings: true},
+		{id: "apps", title: "应用搜索", desc: "搜索已安装应用", status: a.launcherAppStatus(), on: &a.settings.LauncherSearchApps},
+		{id: "files", title: "文件搜索", desc: "搜索桌面、下载、文档和主目录浅层", status: a.launcherFileStatus(), on: &a.settings.LauncherSearchFiles},
+		{id: "vscode", title: "VS Code 快速打开", desc: "输入触发词 + 空格，快速打开项目", on: &a.settings.LauncherVSCodeEnabled, hasSettings: true},
+		{id: "trae", title: "Trae 快速打开", desc: "输入触发词 + 空格，快速打开项目", on: &a.settings.LauncherTraeEnabled, hasSettings: true},
+		{id: "fork", title: "Fork 快速打开", desc: "输入触发词 + 空格，用 Fork 打开 Git 仓库", on: &a.settings.LauncherForkEnabled, hasSettings: true},
+	}
 	ui.Column(c).Gap(10).Children(func() {
-		// 划词翻译：快捷键、目标语言、系统权限和服务商都收在抽屉里。
-		a.launcherSourceItem(c, "translate", "划词翻译", "在任意应用选中文本按快捷键读取，或用启动器命令翻译剪贴板。", &a.settings.TranslationEnabled, func() {
-			if !a.settings.TranslationEnabled {
-				ui.Text(c, "开启后按快捷键划词翻译，也可以点下面的「翻译剪贴板」直接翻译。").
-					FontSize(12).TextColor(colTextMuted)
-				return
-			}
-			ui.Column(c).Gap(16).Children(func() {
-				a.hotkeyRecorder(c, "translate")
-				a.langSelect(c)
-				// 只有 macOS 需要系统授权；Windows 读取选区走模拟 Ctrl+C，没有授权概念。
-				if runtime.GOOS == "darwin" {
-					a.permissionStrip(c, "辅助功能权限", "用于读取当前应用中被选中的文本。", "accessibility", permissions().Accessibility)
+		for i := 0; i < len(features); i += 2 {
+			end := min(i+2, len(features))
+			ui.Row(c).Gap(10).AlignItems(ui.Stretch).Children(func() {
+				for j := i; j < end; j++ {
+					a.homeFeatureCard(c, features[j])
 				}
-				a.providerGrid(c)
-				if primaryBtn(c, "翻译剪贴板").Clicked() {
-					a.translateClipboard()
+				// 奇数项时补一个空块，最后一张卡片保持半宽、不会被拉满整行。
+				if end-i < 2 {
+					ui.Box(c).Grow(1)
 				}
 			})
-		})
-		// 截图标注：快捷键与屏幕录制权限收在抽屉里。
-		a.launcherSourceItem(c, "screenshot", "截图标注", "冻结整屏后框选，支持矩形、箭头、文字和马赛克标注。", &a.settings.ScreenshotEnabled, func() {
-			if !a.settings.ScreenshotEnabled {
-				ui.Text(c, "开启后按快捷键进入截图标注。").
-					FontSize(12).TextColor(colTextMuted)
-				return
+		}
+	})
+}
+
+// homeFeatureCard 画一张功能卡片。整张卡片不可点击：开关负责启停，
+// 齿轮负责配置，两者分开避免点开关时误开弹框。
+func (a *app) homeFeatureCard(c *ui.Context, f homeFeature) {
+	ui.Column(c.Key("home-feature-"+f.id)).Grow(1).MinWidth(0).Padding(16).Radius(12).
+		Background(colBg).Border(1, colLine).Children(func() {
+		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+			if toolIcon := launcherToolIcons[f.id]; toolIcon != nil {
+				ui.Image(c, toolIcon).Size(28, 28)
+			} else {
+				iconTile(c, homeFeatureIcon(f.id), 28, 8, colBgSoft, colTextSoft)
 			}
-			ui.Column(c).Gap(16).Children(func() {
-				a.hotkeyRecorder(c, "screenshot")
-				// Windows 的屏幕捕获不需要授权。
-				if runtime.GOOS == "darwin" {
-					a.permissionStrip(c, "屏幕录制权限", "用于捕获当前显示器画面并进入标注编辑。", "screenRecording", permissions().ScreenRecording)
-				}
-				if primaryBtn(c, "立即截图").Clicked() {
-					a.startCapture()
-				}
-			})
-		})
-		a.launcherSourceItem(c, "image-compress", "图片压缩", "批量压缩 PNG / JPEG / WebP，支持本地离线处理与 TinyPNG 云。", &a.settings.ImageCompress.Enabled, func() {
-			if !a.settings.ImageCompress.Enabled {
-				ui.Text(c, "开启后在启动器输入 tiny，或从这里打开图片压缩窗口。").
-					FontSize(12).TextColor(colTextMuted)
-				return
-			}
-			ui.Column(c).Gap(14).Children(func() {
-				ui.Text(c, "支持批量选择或拖入图片、质量与最长边调整、单张另存、覆盖原图和 ZIP 打包。").
-					FontSize(12).TextColor(colTextSoft).MaxLines(2)
-				ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-					engine := "本地压缩"
-					if a.settings.ImageCompress.Engine == "tinypng" {
-						engine = "TinyPNG 云"
-					}
-					pill(c, engine, colAccentSoft, colAccentStr)
-					if primaryBtn(c, "打开图片压缩").Clicked() {
-						a.showImageCompressor()
+			ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, f.title).FontSize(13).Bold()
+					// 不开设置也能看到是否真的生效，避免开了开关却一直没配置。
+					if badge, tone := a.launcherSourceBadge(f.id); badge != "" {
+						badgeBg, badgeFg := colBgSoft, colTextMuted
+						switch tone {
+						case "warn":
+							badgeBg, badgeFg = colAccentSoft, colAccentStr
+						case "danger":
+							badgeBg, badgeFg = ui.RGBA(255, 107, 104, 0.14), colDanger
+						}
+						pill(c, badge, badgeBg, badgeFg)
 					}
 				})
+				ui.Text(c, f.desc).FontSize(11).TextColor(colTextMuted).MaxLines(2)
+				if f.status != "" {
+					ui.Text(c, f.status).FontSize(11).TextColor(colTextMuted).MaxLines(2)
+				}
 			})
-		})
-		a.launcherSourceItem(c, "apps", "应用搜索", "搜索已安装应用", &a.settings.LauncherSearchApps, func() {
-			ui.Column(c).Gap(7).Children(func() {
-				ui.Text(c, "从系统已安装应用中检索，结果显示真实图标。").
-					FontSize(12).TextColor(colTextSoft)
-				ui.Text(c, a.launcherAppStatus()).FontSize(11).TextColor(colTextMuted).MaxLines(2)
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				if f.hasSettings {
+					gear := ui.Button(c.Key("home-gear-"+f.id), "").Label(f.title+"设置").Tooltip("设置").
+						Size(30, 30).Padding(0).Radius(8).Background(colBgSoft).Border(1, colLine)
+					gear.Children(func() {
+						ui.Icon(c, icon("settings")).FontSize(15).TextColor(colTextMuted)
+					})
+					if gear.Clicked() {
+						a.openFeatureModal(f.id)
+					}
+				}
+				if ui.Switch(c, f.on).Label(f.title + "开关").Changed() {
+					switch f.id {
+					case "translate", "screenshot":
+						a.afterFeatureChange(f.id)
+					case "image-compress":
+						a.afterImageCompressToggle()
+					case "vscode":
+						a.afterVSCodeToggle()
+					case "trae":
+						a.afterTraeToggle()
+					case "fork":
+						a.afterForkToggle()
+					default:
+						a.afterLauncherSourceChange()
+					}
+				}
 			})
-		})
-		a.launcherSourceItem(c, "files", "文件搜索", "搜索桌面、下载、文档和主目录浅层", &a.settings.LauncherSearchFiles, func() {
-			ui.Column(c).Gap(7).Children(func() {
-				ui.Text(c, "文件索引在首次唤起时建立，覆盖常用目录，不做全盘搜索。").
-					FontSize(12).TextColor(colTextSoft)
-				ui.Text(c, a.launcherFileStatus()).FontSize(11).TextColor(colTextMuted).MaxLines(2)
-			})
-		})
-		a.launcherSourceItem(c, "websearch", "网页搜索", "配置触发词和搜索地址，输入触发词 + 空格搜索网页", &a.settings.LauncherWebSearchEnabled, func() {
-			if a.settings.LauncherWebSearchEnabled {
-				a.webSearchSettings(c)
-				return
-			}
-			ui.Text(c, "开启后可添加多个搜索引擎，默认提供百度、Google、Bing，也可以自定义。").
-				FontSize(12).TextColor(colTextMuted)
-		})
-		a.launcherSourceItem(c, "vscode", "VS Code 快速打开", "输入触发词 + 空格，快速打开项目", &a.settings.LauncherVSCodeEnabled, func() {
-			if a.settings.LauncherVSCodeEnabled {
-				ui.Column(c).Gap(16).Children(func() {
-					a.vscodeCommandRow(c)
-					a.vscodeFolderSection(c)
-				})
-				return
-			}
-			ui.Text(c, "开启后配置命令和项目文件夹，首次开启会自动检测 VS Code。").
-				FontSize(12).TextColor(colTextMuted)
-		})
-		a.launcherSourceItem(c, "trae", "Trae 快速打开", "输入触发词 + 空格，快速打开项目", &a.settings.LauncherTraeEnabled, func() {
-			if a.settings.LauncherTraeEnabled {
-				ui.Column(c).Gap(16).Children(func() {
-					a.traeCommandRow(c)
-					a.traeFolderSection(c)
-				})
-				return
-			}
-			ui.Text(c, "开启后配置命令和项目文件夹，首次开启会自动检测 Trae。").
-				FontSize(12).TextColor(colTextMuted)
-		})
-		a.launcherSourceItem(c, "fork", "Fork 快速打开", "输入触发词 + 空格，用 Fork 打开 Git 仓库", &a.settings.LauncherForkEnabled, func() {
-			if a.settings.LauncherForkEnabled {
-				ui.Column(c).Gap(16).Children(func() {
-					a.forkCommandRow(c)
-					a.forkFolderSection(c)
-				})
-				return
-			}
-			ui.Text(c, "开启后配置命令和项目文件夹；Fork 只能打开 Git 仓库，列表只列含 .git 的目录。").
-				FontSize(12).TextColor(colTextMuted)
 		})
 	})
 }
 
-// homeCommandsSection 是功能中心里「内置命令」的折叠小节：默认收起，
-// 点标题行展开只读的命令说明，平时不占版面。
+// homeFeatureIcon 给没有品牌图标的卡片选一个线性图标。
+func homeFeatureIcon(id string) string {
+	switch id {
+	case "files":
+		return "file"
+	case "websearch":
+		return "language"
+	case "image-compress":
+		return "image-compress"
+	case "translate":
+		return "translate"
+	case "screenshot":
+		return "screenshot"
+	}
+	return "app"
+}
+
+// featureModalView 渲染功能设置弹框：卡片上的齿轮从这里打开，一次只开一个。
+func (a *app) featureModalView(c *ui.Context) {
+	if a.featureModal == "" {
+		return
+	}
+	id := a.featureModal
+	open := true
+	lightModal(c, &open, func() {
+		ui.Column(c).Width(620).Gap(16).Padding(4).Children(func() {
+			a.featureModalHeader(c, homeFeatureTitle(id))
+			// 内容可能很长（翻译服务商网格、项目文件夹列表），超出部分滚动。
+			ui.Scroll(c).MaxHeight(560).Children(func() {
+				ui.Column(c).Gap(16).Children(func() {
+					a.featureSettingsBody(c, id)
+				})
+			})
+		})
+	})
+}
+
+// featureModalHeader 是功能设置弹框的标题行，关闭按钮清掉当前弹框。
+func (a *app) featureModalHeader(c *ui.Context, title string) {
+	ui.Row(c).AlignItems(ui.Center).Children(func() {
+		ui.Column(c).Grow(1).Gap(5).Children(func() {
+			ui.Text(c, "功能设置").FontSize(11).Bold().TextColor(colTextMuted).LetterSpacing(1.4)
+			ui.Text(c, title).FontSize(21).Bold()
+		})
+		// 标签带上功能名，无障碍读起来明确，测试里也不会和供应商弹窗的「关闭」混淆。
+		closeBtn := ghostBtn(c, "").Label("关闭 "+title).Size(34, 34).Center()
+		closeBtn.Children(func() {
+			ui.Icon(c, icon("close")).FontSize(15).TextColor(colTextSoft)
+		})
+		if closeBtn.Clicked() {
+			a.featureModal = ""
+		}
+	})
+}
+
+func homeFeatureTitle(id string) string {
+	switch id {
+	case "translate":
+		return "划词翻译"
+	case "screenshot":
+		return "截图标注"
+	case "image-compress":
+		return "图片压缩"
+	case "websearch":
+		return "网页搜索"
+	case "vscode":
+		return "VS Code 快速打开"
+	case "trae":
+		return "Trae 快速打开"
+	case "fork":
+		return "Fork 快速打开"
+	}
+	return "功能设置"
+}
+
+// featureSettingsBody 是各功能卡片齿轮弹框里的设置内容。
+// 关闭状态下只给一句提示，避免弹框里出现一整屏失效的配置。
+func (a *app) featureSettingsBody(c *ui.Context, id string) {
+	switch id {
+	case "translate":
+		if !a.settings.TranslationEnabled {
+			ui.Text(c, "开启后按快捷键划词翻译，也可以通过「翻译剪贴板」直接翻译。").
+				FontSize(12).TextColor(colTextMuted)
+			return
+		}
+		a.hotkeyRecorder(c, "translate")
+		a.langSelect(c)
+		// 只有 macOS 需要系统授权；Windows 读取选区走模拟 Ctrl+C，没有授权概念。
+		if runtime.GOOS == "darwin" {
+			a.permissionStrip(c, "辅助功能权限", "用于读取当前应用中被选中的文本。", "accessibility", permissions().Accessibility)
+		}
+		// 弹框宽度固定，服务商网格直接按两列排。
+		a.providerGridCols(c, 2)
+		if primaryBtn(c, "翻译剪贴板").Clicked() {
+			a.translateClipboard()
+		}
+	case "screenshot":
+		if !a.settings.ScreenshotEnabled {
+			ui.Text(c, "开启后按快捷键进入截图标注。").FontSize(12).TextColor(colTextMuted)
+			return
+		}
+		a.hotkeyRecorder(c, "screenshot")
+		// Windows 的屏幕捕获不需要授权。
+		if runtime.GOOS == "darwin" {
+			a.permissionStrip(c, "屏幕录制权限", "用于捕获当前显示器画面并进入标注编辑。", "screenRecording", permissions().ScreenRecording)
+		}
+		if primaryBtn(c, "立即截图").Clicked() {
+			a.startCapture()
+		}
+	case "image-compress":
+		if !a.settings.ImageCompress.Enabled {
+			ui.Text(c, "开启后在启动器输入 tiny，或从这里打开图片压缩窗口。").
+				FontSize(12).TextColor(colTextMuted)
+			return
+		}
+		ui.Text(c, "支持批量选择或拖入图片、质量与最长边调整、单张另存、覆盖原图和 ZIP 打包。").
+			FontSize(12).TextColor(colTextSoft)
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+			engine := "本地压缩"
+			if a.settings.ImageCompress.Engine == "tinypng" {
+				engine = "TinyPNG 云"
+			}
+			pill(c, engine, colAccentSoft, colAccentStr)
+			if primaryBtn(c, "打开图片压缩").Clicked() {
+				a.showImageCompressor()
+			}
+		})
+		ui.Text(c, "压缩参数在图片压缩窗口右上角的齿轮里调整。").
+			FontSize(12).TextColor(colTextMuted)
+	case "websearch":
+		if !a.settings.LauncherWebSearchEnabled {
+			ui.Text(c, "开启后可添加多个搜索引擎，默认提供百度、Google、Bing，也可以自定义。").
+				FontSize(12).TextColor(colTextMuted)
+			return
+		}
+		a.webSearchSettings(c)
+	case "vscode":
+		if !a.settings.LauncherVSCodeEnabled {
+			ui.Text(c, "开启后配置命令和项目文件夹，首次开启会自动检测 VS Code。").
+				FontSize(12).TextColor(colTextMuted)
+			return
+		}
+		a.vscodeCommandRow(c)
+		a.vscodeFolderSection(c)
+	case "trae":
+		if !a.settings.LauncherTraeEnabled {
+			ui.Text(c, "开启后配置命令和项目文件夹，首次开启会自动检测 Trae。").
+				FontSize(12).TextColor(colTextMuted)
+			return
+		}
+		a.traeCommandRow(c)
+		a.traeFolderSection(c)
+	case "fork":
+		if !a.settings.LauncherForkEnabled {
+			ui.Text(c, "开启后配置命令和项目文件夹；Fork 只能打开 Git 仓库，列表只列含 .git 的目录。").
+				FontSize(12).TextColor(colTextMuted)
+			return
+		}
+		a.forkCommandRow(c)
+		a.forkFolderSection(c)
+	}
+}
+
+// homeCommandsSection 是功能中心里「内置命令」的折叠小节，放在功能卡片上方：
+// 默认收起，点标题行展开只读的命令说明，平时不占版面。
 func (a *app) homeCommandsSection(c *ui.Context) {
 	expanded := a.homeCommandsExpanded
 	bg, border := colCard, colLine
@@ -1104,100 +1247,8 @@ func launcherToolBadge(enabled bool, folders []string, checking, checked, ready 
 	return "", ""
 }
 
-// launcherSourceItem 每个启动项一张卡片：标题行点击展开/收起，配置抽屉收在卡片内。
-func (a *app) launcherSourceItem(c *ui.Context, id, title, desc string, on *bool, body func()) {
-	// 没有配置内容的启动项不参与展开，避免出现一块空抽屉和多余的分隔线。
-	expandable := body != nil
-	expanded := expandable && a.launcherSourceExpanded == id
-	bg := colBg
-	border := colLine
-	if expanded {
-		bg = ui.Hex("#26272b")
-		border = colLineStrong
-	}
-	ui.Column(c.Key("launcher-source-"+id)).Radius(12).Background(bg).
-		Border(1, border).Children(func() {
-		header := ui.Row(c).Padding(14, 16).Gap(12).AlignItems(ui.Center)
-		if expandable {
-			header.Label("展开或收起 " + title)
-		}
-		header.Children(func() {
-			if toolIcon := launcherToolIcons[id]; toolIcon != nil {
-				ui.Image(c, toolIcon).Size(30, 30)
-			} else {
-				iconName := "app"
-				switch id {
-				case "translate":
-					iconName = "translate"
-				case "screenshot":
-					iconName = "screenshot"
-				case "image-compress":
-					iconName = "image-compress"
-				case "files":
-					iconName = "file"
-				case "websearch":
-					iconName = "language"
-				}
-				iconTile(c, iconName, 30, 9, colBgSoft, colTextSoft)
-			}
-			ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
-				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, title).FontSize(13).Bold()
-					// 关掉详情也能看到是否真的生效，避免开了开关却一直没配置。
-					if badge, tone := a.launcherSourceBadge(id); badge != "" {
-						badgeBg, badgeFg := colBgSoft, colTextMuted
-						switch tone {
-						case "warn":
-							badgeBg, badgeFg = colAccentSoft, colAccentStr
-						case "danger":
-							badgeBg, badgeFg = ui.RGBA(255, 107, 104, 0.14), colDanger
-						}
-						pill(c, badge, badgeBg, badgeFg)
-					}
-				})
-				ui.Text(c, desc).FontSize(11).TextColor(colTextMuted).MaxLines(2)
-			})
-			if ui.Switch(c, on).Label(title + "开关").Changed() {
-				switch id {
-				case "translate":
-					a.afterFeatureChange("translate")
-				case "screenshot":
-					a.afterFeatureChange("screenshot")
-				case "image-compress":
-					a.afterImageCompressToggle()
-				case "vscode":
-					a.afterVSCodeToggle()
-				case "trae":
-					a.afterTraeToggle()
-				case "fork":
-					a.afterForkToggle()
-				default:
-					a.afterLauncherSourceChange()
-				}
-			}
-			if expandable {
-				ui.Icon(c, icon("chevron-down")).FontSize(16).TextColor(colTextMuted).
-					Rotate(map[bool]float32{true: 180}[expanded])
-			}
-		})
-		if expandable && header.Clicked() {
-			if expanded {
-				a.launcherSourceExpanded = ""
-			} else {
-				a.launcherSourceExpanded = id
-			}
-		}
-		// 开关事件不在卡片点击里处理，避免操作开关时同时触发展开/收起。
-		if !expanded {
-			return
-		}
-		ui.Column(c).Margin(0, 16, 0, 0).Padding(14, 16).BorderWidth(1, 0, 0, 0).
-			BorderColor(colLine).Children(body)
-	})
-}
-
 // projectTool 汇总一个项目工具（VS Code / Fork）在设置页需要的状态与回调。
-// 两者的抽屉内容只有命令、检测状态和文件夹列表，抽成一份避免重复。
+// 两者的设置内容只有命令、检测状态和文件夹列表，抽成一份避免重复。
 type projectTool struct {
 	id          string
 	label       string
@@ -1366,7 +1417,7 @@ func (a *app) projectFolderSection(c *ui.Context, t projectTool) {
 	})
 }
 
-// webSearchSettings 是「网页搜索」卡片的配置抽屉：引擎列表 + 预设添加。
+// webSearchSettings 是「网页搜索」卡片齿轮弹框里的设置：引擎列表 + 预设添加。
 func (a *app) webSearchSettings(c *ui.Context) {
 	ui.Column(c).Gap(10).Children(func() {
 		ui.Column(c).Gap(3).Children(func() {

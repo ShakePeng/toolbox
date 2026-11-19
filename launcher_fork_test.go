@@ -74,7 +74,7 @@ func TestActivateProjectUsesForkLauncher(t *testing.T) {
 	}
 }
 
-// Fork 配置完全独立：两个源的抽屉可以同时展开，键名不能冲突。
+// Fork 配置完全独立：和 VS Code 的弹框设置互不影响，键名不能冲突。
 func TestForkSettingsCard(t *testing.T) {
 	a := newTestApp()
 	a.settings.LauncherForkEnabled = true
@@ -87,12 +87,12 @@ func TestForkSettingsCard(t *testing.T) {
 	if !tt.HasText("Fork 快速打开") {
 		t.Fatalf("功能中心应显示 Fork 卡片，实际文本：%q", tt.Texts())
 	}
-	if err := tt.Click("展开或收起 Fork 快速打开"); err != nil {
+	if err := tt.Click("Fork 快速打开设置"); err != nil {
 		t.Fatalf("展开 Fork 卡片失败：%v", err)
 	}
 	for _, want := range []string{"触发词", "项目文件夹", "/repos"} {
 		if !tt.HasText(want) {
-			t.Errorf("Fork 抽屉应显示 %q，实际文本：%q", want, tt.Texts())
+			t.Errorf("Fork 设置弹框应显示 %q，实际文本：%q", want, tt.Texts())
 		}
 	}
 }

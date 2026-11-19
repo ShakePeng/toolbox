@@ -32,17 +32,19 @@ func TestRenderSnapshots(t *testing.T) {
 		{"overview_1080", "overview", 1080, 760, false},
 		// 功能中心很长：启动项卡片和内置命令在首屏之下，用高窗口完整渲染。
 		{"overview_full_1080", "overview", 1080, 1500, false},
-		{"overview_vscode_expanded_1080", "overview", 1080, 1500, false},
-		{"overview_apps_expanded_1080", "overview", 1080, 1500, false},
-		{"overview_fork_expanded_1080", "overview", 1080, 1500, false},
+		{"overview_vscode_modal_1080", "overview", 1080, 900, false},
+		{"overview_websearch_modal_1080", "overview", 1080, 900, false},
+		{"overview_fork_modal_1080", "overview", 1080, 900, false},
 		{"overview_commands_expanded_1080", "overview", 1080, 1500, false},
 		{"ai_1080", "ai", 1080, 760, false},
 		{"settings_1080", "settings", 1080, 760, false},
-		{"overview_translate_expanded_1080", "overview", 1080, 1500, false},
-		{"overview_screenshot_expanded_1080", "overview", 1080, 1500, false},
-		{"overview_image_compress_expanded_1080", "overview", 1080, 1500, false},
+		{"overview_translate_modal_1080", "overview", 1080, 900, false},
+		{"overview_screenshot_modal_1080", "overview", 1080, 900, false},
+		{"overview_image_compress_modal_1080", "overview", 1080, 900, false},
 		{"modal_launcher_hotkey_1080", "overview", 1080, 760, false},
 		{"modal_provider_1080", "overview", 1080, 760, true},
+		// 从功能设置弹框里打开的供应商编辑，要跟着走浅色，不能白底叠黑框。
+		{"modal_provider_from_feature_1080", "overview", 1080, 900, true},
 		// 收窄到最小窗口，验证堆叠/降列
 		{"overview_900", "overview", 900, 640, false},
 		{"overview_full_900", "overview", 900, 1500, false},
@@ -51,33 +53,37 @@ func TestRenderSnapshots(t *testing.T) {
 	for _, s := range snaps {
 		a := newTestApp()
 		a.section = s.sec
-		if s.name == "overview_vscode_expanded_1080" {
+		if s.name == "overview_vscode_modal_1080" {
 			a.settings.LauncherVSCodeEnabled = true
 			a.settings.LauncherVSCodeCommand = "code"
 			a.settings.LauncherVSCodeFolders = []string{"~/projects", "~/work"}
-			a.launcherSourceExpanded = "vscode"
+			a.featureModal = "vscode"
 		}
-		// 展开态快照：验证配置抽屉在卡片内的排版，以及没有内容的项不会留出空抽屉。
-		if s.name == "overview_apps_expanded_1080" {
-			a.launcherSourceExpanded = "apps"
+		// 弹框快照：验证各功能设置弹框的排版。
+		if s.name == "overview_websearch_modal_1080" {
+			a.settings.LauncherWebSearchEnabled = true
+			a.featureModal = "websearch"
 		}
-		if s.name == "overview_fork_expanded_1080" {
+		if s.name == "overview_fork_modal_1080" {
 			a.settings.LauncherForkEnabled = true
 			a.settings.LauncherForkCommand = "fork"
 			a.settings.LauncherForkFolders = []string{"~/workSpace", "~/studySpace"}
-			a.launcherSourceExpanded = "fork"
+			a.featureModal = "fork"
 		}
 		if s.name == "overview_commands_expanded_1080" {
 			a.homeCommandsExpanded = true
 		}
-		if s.name == "overview_translate_expanded_1080" {
-			a.launcherSourceExpanded = "translate"
+		if s.name == "overview_translate_modal_1080" {
+			a.featureModal = "translate"
 		}
-		if s.name == "overview_screenshot_expanded_1080" {
-			a.launcherSourceExpanded = "screenshot"
+		if s.name == "overview_screenshot_modal_1080" {
+			a.featureModal = "screenshot"
 		}
-		if s.name == "overview_image_compress_expanded_1080" {
-			a.launcherSourceExpanded = "image-compress"
+		if s.name == "overview_image_compress_modal_1080" {
+			a.featureModal = "image-compress"
+		}
+		if s.name == "modal_provider_from_feature_1080" {
+			a.featureModal = "translate"
 		}
 		if s.name == "modal_launcher_hotkey_1080" {
 			a.configModal = "launcher-hotkey"

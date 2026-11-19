@@ -97,7 +97,13 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 
 主界面结构：侧栏（品牌 + 导航）+ 内容区。`section` 只取 `overview | ai | settings`，`visibleSections` 恒返回三项（功能中心、AI供应商、设置）；翻译、截图、启动器没有独立页面，配置都收在功能中心里。
 
-功能中心（`overviewSection`）自上而下是：`launcherHero` 显示启动器快捷键与「打开启动器」；未完成的首次引导插一张 `welcomeCard`；`homeFeaturesGroup` 是九张可展开的抽屉卡（复用 `launcherSourceItem`）：划词翻译、截图标注、图片压缩在最前，其后是六个启动项（apps/files/websearch/vscode/trae/fork）——划词翻译的抽屉里是快捷键、目标语言、macOS 权限条、Provider 网格和「翻译剪贴板」，截图标注的抽屉里是快捷键、权限条和「立即截图」；最后 `homeCommandsSection` 是内置命令的折叠说明小节。功能中心没有 AI 供应商和应用与更新卡片（入口分别是侧栏和设置页）。配置弹窗只剩启动器快捷键一种，由 `app.configModal`（空 | `launcher-hotkey`）驱动，`openConfigModal` 统一入口；`openFeatureDrawer(id)` 负责展开某个功能抽屉并唤起主窗口（翻译浮窗的「打开设置」走这里）。响应式规则：窗口宽 `<980` 视为紧凑（侧栏 196、内边距 24），内容宽度封顶 1120；Provider 卡片在 660/430 阈值下降为 3/2/1 列。主题固定深色暖琥珀（`theme.go`），不跟随系统明暗。
+功能中心（`overviewSection`）自上而下是：`intro` 标题 + `launcherHero` 主卡（显示启动器快捷键与「打开启动器」）；未完成的首次引导插一张 `welcomeCard`；`homeCommandsSection` 是内置命令的折叠小节；`homeFeaturesGroup` 是九张功能卡片。内置命令放在功能卡片上方，因为它是启动器的固定入口，比逐个功能的开关更常看。
+
+`homeFeaturesGroup` 一行两张卡片（`homeFeature` 描述符 + `homeFeatureCard`），顺序是划词翻译、截图标注、图片压缩、网页搜索、应用搜索、文件搜索、VS Code、Trae、Fork；奇数项用 `ui.Box().Basis(0).Grow(1)` 占位。卡片不可点击展开：右侧开关负责启停，需要配置的项在开关前有一个齿轮按钮（`c.Key("home-gear-"+id)`，Label 为「某功能设置」），点齿轮打开 `featureModalView` 的弹框，内容由 `featureSettingsBody` 按 id 渲染（翻译是快捷键、目标语言、macOS 权限条、两列 Provider 网格和「翻译剪贴板」；截图是快捷键、权限条和「立即截图」；VS Code / Trae / Fork 是触发词 + 项目文件夹）。应用搜索、文件搜索没有配置项，也就没有齿轮，加载状态（`launcherAppStatus` / `launcherFileStatus`）常显在描述下面一行小字。
+
+功能中心没有 AI 供应商和应用与更新卡片（入口分别是侧栏和设置页）。配置弹窗只剩启动器快捷键一种，由 `app.configModal`（空 | `launcher-hotkey`）驱动，`openConfigModal` 统一入口；功能设置弹框由 `app.featureModal`（空 | 功能 id）驱动，`openFeatureModal(id)` 是统一入口（翻译浮窗的「打开设置」走这里）。弹框都挂在根视图、内容区之外，并且**渲染顺序即层级**：`featureModalView` 必须排在 `providerModal` 前面，否则从翻译设置里打开的供应商编辑弹框会被压在下层点不到。
+
+响应式规则：窗口宽 `<980` 视为紧凑（侧栏 196、内边距 24），内容宽度封顶 1120；Provider 卡片在 660/430 阈值下降为 3/2/1 列。主题固定深色暖琥珀（`theme.go`），不跟随系统明暗。**弹框例外**：主窗口是深色，设置弹框再用深色就和页面糊在一起，所以 `lightModal` 把弹框（`featureModalView`、启动器快捷键弹窗，以及在功能弹框里打开的供应商编辑弹框）渲染进 `sToolsLightTheme()` 的浅色主题，并用 `withLightPalette()` 在构建这段子树时临时把 `colText` / `colBg` / `colLine` 等全局色板换成浅色值（构建完立刻恢复，`defer` 执行，不影响主窗口）。和页面共用的 `primaryBtn`、`permissionStrip`、`providerCard` 因此不用写两套。新增深色页面内的组件时如果只在弹框里出现，记得用 `col*` 变量取色而不要硬编码深色值。
 
 ### 状态与配置
 
