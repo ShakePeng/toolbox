@@ -13,6 +13,7 @@ type builtinCommandID string
 
 const (
 	cmdReindex  builtinCommandID = "reindex"
+	cmdTiny     builtinCommandID = "tiny"
 	cmdUpdate   builtinCommandID = "update"
 	cmdAI       builtinCommandID = "ai"
 	cmdSettings builtinCommandID = "settings"
@@ -45,6 +46,15 @@ func builtinCommandTable() []builtinCommand {
 			KeepOpen: true,
 			Run: func(s *launcherSession, arg string) error {
 				s.runReindexCommand()
+				return nil
+			},
+		},
+		{
+			ID: cmdTiny, Names: []string{"tiny", "图片压缩"},
+			Title: "图片压缩", Desc: "批量压缩 PNG / JPEG / WebP，支持本地与 TinyPNG", Icon: "image-compress",
+			Keywords: []string{"image", "tinypng", "压缩"},
+			Run: func(s *launcherSession, arg string) error {
+				s.app.showImageCompressor()
 				return nil
 			},
 		},
@@ -87,6 +97,14 @@ func builtinCommandTable() []builtinCommand {
 	}
 }
 
+// enabled 是纯函数，渲染与执行共用；功能关闭时旧结果也不能再被回车执行。
+func (c builtinCommand) enabled(a *app) bool {
+	if c.ID == cmdTiny && a != nil {
+		return a.settings.ImageCompress.Enabled
+	}
+	return true
+}
+
 // lookupBuiltinCommand 按 id 取命令，找不到时第二个返回值为 false。
 func lookupBuiltinCommand(id builtinCommandID) (builtinCommand, bool) {
 	for _, cmd := range builtinCommandTable() {
@@ -98,8 +116,9 @@ func lookupBuiltinCommand(id builtinCommandID) (builtinCommand, bool) {
 }
 
 // matchBuiltinCommand 把输入拆成「命令词 + 参数」并返回命中的命令。
-// 带参数时命令词只允许前缀匹配，避免长句里的片段被误当成命令；
-// 不带参数时保留子串匹配，输入 rei / 重建 都能命中重建索引。
+// 触发词只认前缀（至少两个字符），与 VS Code / Fork / 网页搜索的触发词规则一致：
+// 输入 co、fo 会给出提示行，输入 ti 就应该是图片压缩，而不是被 settings 里的
+// "tin" 子串抢走。
 func matchBuiltinCommand(query string) (builtinCommand, string, bool) {
 	q := strings.TrimSpace(query)
 	// 至少两个字符才提示，单个字母会把命令行顶到应用和文件结果前面。
@@ -115,20 +134,21 @@ func matchBuiltinCommand(query string) (builtinCommand, string, bool) {
 	if lowerHead == "" {
 		return builtinCommand{}, "", false
 	}
-	hasArg := arg != ""
 
 	var best builtinCommand
-	bestLen := 0
+	bestExact, bestLen := false, 0
 	for _, cmd := range builtinCommandTable() {
 		for _, word := range cmd.matchWords() {
 			lower := strings.ToLower(word)
-			hit := strings.Contains(lower, lowerHead)
-			if hasArg {
-				hit = strings.HasPrefix(lower, lowerHead)
+			if !strings.HasPrefix(lower, lowerHead) {
+				continue
 			}
-			// 命中更长的词优先，避免 "ai" 抢走 "AI供应商" 这类长别名。
-			if hit && utf8.RuneCountInString(lower) > bestLen {
-				best, bestLen = cmd, utf8.RuneCountInString(lower)
+			exact := lower == lowerHead
+			length := utf8.RuneCountInString(lower)
+			// 完全相等优先于前缀；同一档里命中更长的词优先，
+			// 避免 "ai" 抢走 "AI供应商" 这类长别名。
+			if (exact && !bestExact) || (exact == bestExact && length > bestLen) {
+				best, bestExact, bestLen = cmd, exact, length
 			}
 		}
 	}

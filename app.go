@@ -60,6 +60,8 @@ type app struct {
 	trans *translationSession
 	// launcher 是复用的快速启动浮窗，首次唤起时创建。
 	launcher *launcherSession
+	// compressor 是独立的图片压缩窗口，关闭只隐藏，批量任务继续保留。
+	compressor *imageCompressSession
 	// vscode 保存自定义命令的探测结果，供启动页和项目模式使用。
 	vscode vscodeState
 	// fork 保存 Fork 的探测结果，没有 CLI 时回退应用本体。

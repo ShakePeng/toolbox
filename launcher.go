@@ -338,7 +338,7 @@ func (s *launcherSession) launcherActions() []launcherItem {
 		return nil
 	}
 	var items []launcherItem
-	if cmd, arg, ok := matchBuiltinCommand(q); ok {
+	if cmd, arg, ok := matchBuiltinCommand(q); ok && cmd.enabled(s.app) {
 		items = append(items, s.builtinItem(cmd, arg))
 	}
 	// 已经输入空格时由 projectQuery 负责项目模式，这里只提示触发词本身。
@@ -397,7 +397,7 @@ func (s *launcherSession) builtinItem(cmd builtinCommand, arg string) launcherIt
 // 其余命令执行后隐藏。
 func (s *launcherSession) runBuiltin(item launcherItem) {
 	cmd, ok := lookupBuiltinCommand(item.command)
-	if !ok {
+	if !ok || !cmd.enabled(s.app) {
 		return
 	}
 	if err := cmd.Run(s, item.arg); err != nil {
@@ -897,6 +897,27 @@ func (a *app) homeFeaturesGroup(c *ui.Context) {
 				}
 			})
 		})
+		a.launcherSourceItem(c, "image-compress", "图片压缩", "批量压缩 PNG / JPEG / WebP，支持本地离线处理与 TinyPNG 云。", &a.settings.ImageCompress.Enabled, func() {
+			if !a.settings.ImageCompress.Enabled {
+				ui.Text(c, "开启后在启动器输入 tiny，或从这里打开图片压缩窗口。").
+					FontSize(12).TextColor(colTextMuted)
+				return
+			}
+			ui.Column(c).Gap(14).Children(func() {
+				ui.Text(c, "支持批量选择或拖入图片、质量与最长边调整、单张另存、覆盖原图和 ZIP 打包。").
+					FontSize(12).TextColor(colTextSoft).MaxLines(2)
+				ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+					engine := "本地压缩"
+					if a.settings.ImageCompress.Engine == "tinypng" {
+						engine = "TinyPNG 云"
+					}
+					pill(c, engine, colAccentSoft, colAccentStr)
+					if primaryBtn(c, "打开图片压缩").Clicked() {
+						a.showImageCompressor()
+					}
+				})
+			})
+		})
 		a.launcherSourceItem(c, "apps", "应用搜索", "搜索已安装应用", &a.settings.LauncherSearchApps, func() {
 			ui.Column(c).Gap(7).Children(func() {
 				ui.Text(c, "从系统已安装应用中检索，结果显示真实图标。").
@@ -983,7 +1004,9 @@ func (a *app) homeCommandsSection(c *ui.Context) {
 		if expanded {
 			ui.Column(c).Padding(0, 16, 16, 16).Gap(8).Children(func() {
 				for _, cmd := range builtinCommandTable() {
-					builtinCommandRow(c, cmd.Names, cmd.Desc)
+					if cmd.enabled(a) {
+						builtinCommandRow(c, cmd.Names, cmd.Desc)
+					}
 				}
 			})
 		}
@@ -1108,6 +1131,8 @@ func (a *app) launcherSourceItem(c *ui.Context, id, title, desc string, on *bool
 					iconName = "translate"
 				case "screenshot":
 					iconName = "screenshot"
+				case "image-compress":
+					iconName = "image-compress"
 				case "files":
 					iconName = "file"
 				case "websearch":
@@ -1138,6 +1163,8 @@ func (a *app) launcherSourceItem(c *ui.Context, id, title, desc string, on *bool
 					a.afterFeatureChange("translate")
 				case "screenshot":
 					a.afterFeatureChange("screenshot")
+				case "image-compress":
+					a.afterImageCompressToggle()
 				case "vscode":
 					a.afterVSCodeToggle()
 				case "trae":

@@ -10,7 +10,7 @@ import (
 
 // configSchemaVersion 是落盘配置的版本。迁移必须按版本逐级判断，
 // 不能只看“小于当前版本”，否则升级到 v3 会把 v2 用户的搜索源选择覆盖掉。
-const configSchemaVersion = 10
+const configSchemaVersion = 13
 
 // HotkeySettings 是各插件绑定的全局快捷键（accelerator 字符串）。
 type HotkeySettings struct {
@@ -48,10 +48,12 @@ type Settings struct {
 	LauncherWebSearchEngines []LauncherSearchEngine `json:"launcherWebSearchEngines"`
 	// AISuppliers 是独立于翻译插件的 AI 供应商配置，目前只做管理。
 	// 每个供应商是 OpenAI 兼容服务，需要 Base URL、API Key 和模型列表。
-	AISuppliers            []AISupplier `json:"aiSuppliers"`
-	TargetLang             string       `json:"targetLang"`
-	LaunchAtLogin          bool         `json:"launchAtLogin"`
-	HasCompletedOnboarding bool         `json:"hasCompletedOnboarding"`
+	AISuppliers []AISupplier `json:"aiSuppliers"`
+	// ImageCompress 保存图片压缩窗口的引擎、参数和 TinyPNG 凭据。
+	ImageCompress          ImageCompressSettings `json:"imageCompress"`
+	TargetLang             string                `json:"targetLang"`
+	LaunchAtLogin          bool                  `json:"launchAtLogin"`
+	HasCompletedOnboarding bool                  `json:"hasCompletedOnboarding"`
 }
 
 // LauncherSearchEngine 是一个网页搜索源。URL 用 %s 表示查询词占位符。
@@ -60,6 +62,34 @@ type LauncherSearchEngine struct {
 	Name    string `json:"name"`
 	Command string `json:"command"`
 	URL     string `json:"url"`
+}
+
+// TinyPNGKey 记录一把云端 API Key 及当月已用次数。Key 与现有翻译凭据一样，
+// 目前明文保存在本地配置中，任何日志和错误提示都只能使用脱敏后的内容。
+type TinyPNGKey struct {
+	Key   string `json:"key"`
+	Usage int    `json:"usage"`
+}
+
+// ImageCompressSettings 是图片压缩工具的持久化参数。
+type ImageCompressSettings struct {
+	Enabled     bool         `json:"enabled"`
+	Engine      string       `json:"engine"` // local | tinypng
+	JPEGQuality int          `json:"jpegQuality"`
+	WebPQuality int          `json:"webpQuality"`
+	MaxEdge     int          `json:"maxEdge"`
+	TinyPNGKeys []TinyPNGKey `json:"tinyPngKeys"`
+	// PNGLevel 是 0–6 的 PNG 优化级别：0 不优化、6 压缩率最高但最慢。
+	PNGLevel int `json:"pngLevel"`
+	// LegacyPNGOptimize 是旧版「PNG 使用最佳无损压缩」勾选框，只在 v12→v13 迁移时读取，
+	// 迁移后置空，新配置里不再写这个字段。
+	LegacyPNGOptimize *bool `json:"pngOptimize,omitempty"`
+}
+
+func defaultImageCompressSettings() ImageCompressSettings {
+	return ImageCompressSettings{
+		Engine: "local", Enabled: true, JPEGQuality: 80, WebPQuality: 80, PNGLevel: 3,
+	}
 }
 
 // AISupplier 是一个 OpenAI 兼容的 AI 供应商。API Key 和翻译凭据一样
@@ -133,6 +163,7 @@ func defaultSettings() Settings {
 		LauncherTraeFolders:      nil,
 		LauncherWebSearchEnabled: false,
 		LauncherWebSearchEngines: nil,
+		ImageCompress:            defaultImageCompressSettings(),
 		TargetLang:               "auto",
 		LaunchAtLogin:            false,
 		HasCompletedOnboarding:   false,

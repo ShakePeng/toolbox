@@ -17,6 +17,13 @@ func TestMatchBuiltinCommand(t *testing.T) {
 		{"重建", cmdReindex, "", true},
 		{"索引", cmdReindex, "", true},
 		{"reindex now", cmdReindex, "now", true},
+		// settings 里也含 "tin"，前缀命中必须排在子串命中前面。
+		{"tin", cmdTiny, "", true},
+		{"tiny", cmdTiny, "", true},
+		{"图片", cmdTiny, "", true},
+		{"压缩", cmdTiny, "", true},
+		{"image", cmdTiny, "", true},
+		{"set", cmdSettings, "", true},
 		{"设置", cmdSettings, "", true},
 		{"退出", cmdQuit, "", true},
 		// 截图、翻译只走快捷键，不是内置命令，输入命令词不应命中。

@@ -7,7 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Toolbox 是一个用 Go + [MyGo](https://github.com/egoist/mygo) 构建的原生桌面工具箱（无 webview、无前端框架），发布 macOS（Apple Silicon）与 Windows 两个平台。2.0 起启动器是主入口：应用只驻留托盘，快捷键唤起浮窗，应用、文件、内置命令都从这里执行，主窗口降级为「功能中心」设置界面。
 
 - **启动器**：按快捷键唤起搜索浮窗，按名称筛选已安装应用和常用目录中的文件，上下键切换、回车打开。
-- **内置命令**（`launcher_commands.go` 一张表驱动）：重建索引、AI供应商、设置、检查更新、退出。
+- **内置命令**（`launcher_commands.go` 一张表驱动）：图片压缩（`tiny`）、重建索引、AI供应商、设置、检查更新、退出。
+- **图片压缩**（`image_compress*.go`）：`tiny` 唤起独立可拖动窗口，批量本地压缩 PNG / JPEG / WebP，或走 TinyPNG 云；支持另存、确认后覆盖和 ZIP 打包。
 - **截图标注**：冻结整屏 → 框选 → 矩形/椭圆/直线/箭头/画笔/文字/马赛克标注 → 复制、保存 PNG 或贴图。只走独立快捷键 + 托盘入口，不是启动器命令。
 - **划词翻译**：在任意应用选中文本，按快捷键读取选区，并发请求百度、Google 和「AI 翻译」（从 AI供应商 里选择模型），在浮窗里并排对照。只走快捷键 + 托盘入口；功能中心另有「翻译剪贴板」按钮走 `translateText`，不读选区。
 
@@ -71,7 +72,7 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 
 ### 窗口模型
 
-应用里有五种窗口，都是 MyGo 原生窗口：
+应用里有六种窗口，都是 MyGo 原生窗口：
 
 | 窗口 | 特征 | 生命周期 |
 | --- | --- | --- |
@@ -80,8 +81,9 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 | 贴图窗口 | 无边框、置顶、跨工作区、可拖动 | 每张贴图一个，关闭后从 `a.pins` 移除 |
 | 翻译浮窗 | 无边框、透明、置顶、失焦自动隐藏 | 全局复用一个 `translationSession` |
 | 启动器浮窗 | 无边框、透明、置顶、失焦自动隐藏、屏幕上部居中 | 全局复用一个 `launcherSession`，关闭插件时 `dispose` |
+| 图片压缩窗口 | 普通原生窗口、可拖动、关闭只隐藏 | 全局复用一个 `imageCompressSession`，退出时取消任务 |
 
-`app` 持有 `capture`、`pins`、`trans`、`launcher` 四个引用；退出/关闭路径要保证引用被清理，否则下次无法重新打开。
+`app` 持有 `capture`、`pins`、`trans`、`launcher`、`compressor` 五个引用；退出/关闭路径要保证引用被清理，否则下次无法重新打开。独立窗口不会自动继承主窗口主题，必须显式包 `ui.Themed`；功能中心使用 `sToolsTheme()`，图片压缩工作台使用浅色 `imageCompressTheme()`。
 
 ### UI 构建规则（最关键）
 
@@ -95,13 +97,13 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 
 主界面结构：侧栏（品牌 + 导航）+ 内容区。`section` 只取 `overview | ai | settings`，`visibleSections` 恒返回三项（功能中心、AI供应商、设置）；翻译、截图、启动器没有独立页面，配置都收在功能中心里。
 
-功能中心（`overviewSection`）自上而下是：`launcherHero` 显示启动器快捷键与「打开启动器」；未完成的首次引导插一张 `welcomeCard`；`homeFeaturesGroup` 是八张可展开的抽屉卡（复用 `launcherSourceItem`）：划词翻译、截图标注在最前，其后是六个启动项（apps/files/websearch/vscode/trae/fork）——划词翻译的抽屉里是快捷键、目标语言、macOS 权限条、Provider 网格和「翻译剪贴板」，截图标注的抽屉里是快捷键、权限条和「立即截图」；最后 `homeCommandsSection` 是内置命令的折叠说明小节。功能中心没有 AI 供应商和应用与更新卡片（入口分别是侧栏和设置页）。配置弹窗只剩启动器快捷键一种，由 `app.configModal`（空 | `launcher-hotkey`）驱动，`openConfigModal` 统一入口；`openFeatureDrawer(id)` 负责展开某个功能抽屉并唤起主窗口（翻译浮窗的「打开设置」走这里）。响应式规则：窗口宽 `<980` 视为紧凑（侧栏 196、内边距 24），内容宽度封顶 1120；Provider 卡片在 660/430 阈值下降为 3/2/1 列。主题固定深色暖琥珀（`theme.go`），不跟随系统明暗。
+功能中心（`overviewSection`）自上而下是：`launcherHero` 显示启动器快捷键与「打开启动器」；未完成的首次引导插一张 `welcomeCard`；`homeFeaturesGroup` 是九张可展开的抽屉卡（复用 `launcherSourceItem`）：划词翻译、截图标注、图片压缩在最前，其后是六个启动项（apps/files/websearch/vscode/trae/fork）——划词翻译的抽屉里是快捷键、目标语言、macOS 权限条、Provider 网格和「翻译剪贴板」，截图标注的抽屉里是快捷键、权限条和「立即截图」；最后 `homeCommandsSection` 是内置命令的折叠说明小节。功能中心没有 AI 供应商和应用与更新卡片（入口分别是侧栏和设置页）。配置弹窗只剩启动器快捷键一种，由 `app.configModal`（空 | `launcher-hotkey`）驱动，`openConfigModal` 统一入口；`openFeatureDrawer(id)` 负责展开某个功能抽屉并唤起主窗口（翻译浮窗的「打开设置」走这里）。响应式规则：窗口宽 `<980` 视为紧凑（侧栏 196、内边距 24），内容宽度封顶 1120；Provider 卡片在 660/430 阈值下降为 3/2/1 列。主题固定深色暖琥珀（`theme.go`），不跟随系统明暗。
 
 ### 状态与配置
 
 - 配置路径是 `mygo.App.Path(PathUserData)/config.json`，模型在 `model.go`（camelCase，对齐原 Tauri 项目的配置结构），读写与迁移在 `config.go`。
 - `loadConfig`：文件不存在时写默认配置；解析失败回退默认值并记录 `loadErr`，不阻塞启动。
-- `migrateConfig` 负责：补 `schemaVersion`、补默认快捷键、非 macOS 去掉旧版误录的 `Cmd`、补 `TargetLang`、补 OpenAI 默认 Base URL、重算 `Configured`。迁移必须逐级判断：v1→v2 给启动器搜索源补 `true`，v2→v3 给 VSCode 命令补 `code`，v3→v4 给 Fork 命令补 `fork`，v4→v5 给 Trae 命令补 `trae`；v5→v6 只新增网页搜索字段、v6→v7 只新增 AI 供应商字段，零值即可；v8→v9 把旧 OpenAI 翻译配置迁成 AI 供应商，v9→v10 把启动器变主入口（补 `Hotkeys.Launcher`、打开截图/翻译、老用户标记已完成引导），这些判断都必须在统一改写 schemaVersion 之前。不能统一用 `< configSchemaVersion`，否则 v2 用户显式关闭的搜索源会被覆盖。`LauncherEnabled` 字段已删除，启动器不可关闭。`persist()` 必须写 `configSchemaVersion`。
+- `migrateConfig` 负责：补 `schemaVersion`、补默认快捷键、非 macOS 去掉旧版误录的 `Cmd`、补 `TargetLang`、补 OpenAI 默认 Base URL、重算 `Configured`。迁移必须逐级判断：v1→v2 给启动器搜索源补 `true`，v2→v3 给 VSCode 命令补 `code`，v3→v4 给 Fork 命令补 `fork`，v4→v5 给 Trae 命令补 `trae`；v5→v6 只新增网页搜索字段、v6→v7 只新增 AI 供应商字段，零值即可；v8→v9 把旧 OpenAI 翻译配置迁成 AI 供应商，v9→v10 把启动器变主入口（补 `Hotkeys.Launcher`、打开截图/翻译、老用户标记已完成引导），v10→v11 新增图片压缩默认值（本地引擎、JPEG/WebP 质量 80、PNG 优化、最长边 0），v11→v12 只给图片压缩补独立开关并默认打开、保留已有参数，v12→v13 把 PNG 的 `pngOptimize` 勾选框换成 0–6 的 `pngLevel`（勾选过映射 6、未勾选映射 0，旧字段读进 `LegacyPNGOptimize` 后清空），这些判断都必须在统一改写 schemaVersion 之前。不能统一用 `< configSchemaVersion`，否则 v2 用户显式关闭的搜索源会被覆盖。`LauncherEnabled` 字段已删除，启动器不可关闭。`persist()` 必须写 `configSchemaVersion`。
 - 写入是原子的：先写 `.tmp` 再 `rename`，权限 `0600`。
 - **设置弹窗没有保存按钮**，快捷键、目标语言、开关等改动立刻 `persist()`；测试 `TestManualSaveButtonsRemoved` 会守住这个约定。
 - **翻译凭据和 AI 供应商的 API Key 目前明文存在 config.json**（原版用系统钥匙串），代码注释已标为后续迁移项。新增字段时不要假设已有加密。
@@ -175,10 +177,20 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 - `builtinCommandTable()` 是唯一声明处，搜索匹配（`matchBuiltinCommand`）、结果行渲染、`activate` 分发、功能中心的内置命令折叠小节都只读这张表，新增命令不要再加第六处 switch。
 - 截图、翻译不是内置命令，只走快捷键/托盘；功能模块的开关也不再影响命令匹配。
 - `Run` 返回 error 时写入 `s.notice`。
-- 有参数时命令词只允许前缀匹配，无参数时允许子串匹配（`rei`/`重建` 都能命中重建索引），少于 2 个 rune 不提示；`isBuiltinCommand` 只做精确匹配，供网页搜索/项目触发词的冲突校验用。
+- `enabled(a)` 是命令可用性的纯函数，结果生成、执行兜底和功能中心命令说明共用；图片压缩开关关闭时隐藏并停用 `tiny`，不能用旧的选中结果绕过。
+- 命令触发词一律前缀匹配（至少 2 个 rune，完全相等优先），与网页搜索/项目触发词同一套规则：`rei`/`重建` 命中重建索引，`ti` 命中图片压缩；不再做子串匹配，否则 `tin` 会被 `settings` 里的片段抢走。少于 2 个 rune 不提示；`isBuiltinCommand` 只做精确匹配，供网页搜索/项目触发词的冲突校验用。
 - 结果行 `path` 用 `"cmd-"+id` 作为稳定 UI key，重复会导致输入/选中状态串行。
 - `KeepOpen` 的命令（重建索引）跑完保留浮窗，其余命令执行后关闭浮窗。
 - 主窗口可能常驻隐藏，提示统一走 `a.notify(msg)`：启动器可见就写 `s.notice`，否则才 `a.toast`。
+
+### 图片压缩（`image_compress*.go`）
+
+- 启动器 `tiny` 调 `showImageCompressor()`，功能中心的图片压缩卡片提供独立开关与打开入口，关闭时隐藏窗口并同步移除命令；单例窗口关闭只隐藏。原生多选对话框和 `DroppedFiles()` 共用 `addPaths`，按绝对路径去重，只接受 PNG / JPEG / WebP；添加后只进入等待队列，不自动压缩或上传，由「开始压缩」/单项「压缩」显式启动。
+- 队列严格串行，`startAll` 连续处理等待项，`startOne` 只处理当前项，单项失败不阻塞其他图片。后台读取/压缩后用 `win.Update` 回主线程，并用条目 ID + `Generation` 丢弃重试前的旧结果；`main.go` 退出时取消 session context。
+- 本地引擎：PNG/JPEG 用标准库，WebP 用 CGo-free 的 `github.com/gen2brain/webp`（libwebp WASM 转纯 Go），缩放用 `golang.org/x/image/draw`。保留原格式，最长边只缩小不放大；未缩放且编码结果更大时保留原字节。
+- TinyPNG 上传 `POST https://api.tinify.com/shrink` 后下载 output URL；401/429 轮换 Key，记录 Compression-Count。最长边通过 TinyPNG resize transform 实现。`tinyPNGEndpoint` 是包级变量，测试用 `httptest`，不在测试里请求真实服务。
+- 「下载」在原图旁生成 `-tiny` 文件并重名追加序号；「覆盖原图」必须确认，校验结果可解码且格式一致后，以同目录临时文件 + 备份回滚替换，保留权限。ZIP 只含勾选且已完成的项，去除目录并处理重名。
+- 设置即时保存；TinyPNG 只维护一把 API Key（界面显示脱敏值、可替换或移除），但配置仍是明文。压缩设置是一张卡片 + 弹框：本地模式是 0–6 的 PNG 优化级别、JPEG/WebP 质量和最长边像素四格，云端模式只显示这一把 Key（最长边等本地参数不展示）。图片压缩窗口固定 1000×760，使用浅色卡片工作台、140 高的虚线拖放区和一行两列的压缩队列卡片（卡片内缩略图、文案和图标按钮同排，按钮文字只放在 Tooltip 里；缩略图在 `loadThumbnails` 里后台缩放成 96 像素位图，不能直接把原图交给 `ui.DecodeBitmap`）；文件对话框/确认/保存走 MyGo 原生 Dialog。
 
 ### 快捷键
 
@@ -199,12 +211,13 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 
 - UI 测试用 `ui.NewTester(view, w, h)`，可 `HasText`、`Click`、模拟输入/快捷键并多次 `Frame()`。断言依赖系统中文字体，所以 CI 的 test job 固定在 `macos-latest`。
 - `capture_hover_test.go` 覆盖窗口矩形裁剪/排序/命中、单击选窗、窗口内拖拽退化成框选、有选区后不再画悬停（含像素级断言）；`capture_hover_windows_test.go`（`//go:build windows`）覆盖物理像素→DIP 换算与窗口过滤，在 windows-latest job 运行。
-- `render_test.go` 只在 `RENDER=1` 时运行，把功能中心（含翻译/截图/启动项展开态）、启动器快捷键弹窗、AI供应商、设置页和启动器浮窗在不同窗口宽度渲染成 PNG 到系统临时目录的 `toolbox_render`，用于人工核对响应式布局，不参与 CI。
+- `render_test.go` 只在 `RENDER=1` 时运行，把功能中心（含翻译/截图/启动项展开态）、启动器快捷键弹窗、AI供应商、设置页、启动器浮窗和图片压缩窗口渲染成 PNG 到系统临时目录的 `toolbox_render`，用于人工核对布局，不参与 CI。
 - 翻译测试用 `httptest`，不访问真实接口；覆盖语言判断、Provider 过滤、百度错误码等。
 - 启动器测试分四层：`launcher_search_test.go` 覆盖评分/过滤/排序；`launcher_index_test.go` 用临时目录验证跳过规则、深度和上限；`launcher_projects_test.go` 覆盖「命令 + 空格」解析、下一级目录扫描和项目过滤；`launcher_test.go` 用 `ui.NewTester` 渲染浮窗，并注入假应用/文件/项目和 `launchApp`/`openPath`/`launchProject`，不启动真实应用。
 - `vscode_test.go` / `trae_test.go` 覆盖未知命令探测、shim 不覆盖已有文件、Windows 安装路径、缺失项目目录和项目模式；不会真的启动编辑器。
 - `websearch_test.go` 覆盖 URL 编码、触发词解析与补全、冲突校验、预设增删和占位符校验；打开浏览器通过注入函数断言，不会真的启动浏览器。
 - `ai_suppliers_test.go` 覆盖模型列表解析、保存校验、编辑/删除和页面渲染；保存测试把 `configPath` 指到临时目录，不写用户配置。
+- `image_compress*_test.go` 覆盖三种格式的真实编解码/缩放、TinyPNG 轮换与缩放转换（httptest）、另存重名、覆盖校验与回滚、ZIP 安全命名和窗口渲染；`tinyRename` 注入覆盖失败，不真实请求云端。
 - Windows 专属代码在单独的 `windows-latest` job 运行，macOS 的测试覆盖不到。
 - 改动共享状态时加 `-race`；改 UI 行为时优先补 Tester 测试。
 
@@ -218,7 +231,7 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 
 ## 已知限制
 
-- 翻译凭据明文保存在 `config.json`。
+- 翻译凭据和 TinyPNG API Key 明文保存在 `config.json`。
 - Linux 没有截图和选区读取实现；Windows 划词在终端类应用不可用，管理员权限运行的应用也可能读不到。
 - 截图悬停选窗：候选窗口在抓屏那一刻采样一次，覆盖层打开期间真实窗口移动不会反映（这是刻意的，与冻结画面对齐）。贴图窗口属于本进程会被排除，浮在窗口上时高亮的是它背后的窗口，但输出图里仍包含贴图。Windows 上没有标题且没有 `WS_EX_APPWINDOW` 的窗口不参与命中；跨屏且两屏缩放比例不同的窗口按所在显示器 DPI 近似换算，误差在 1 DIP 级。
 - macOS 15 对直接抓屏有约 30 天一次的「Allow For One Month」确认，与签名无关。
@@ -233,5 +246,6 @@ scripts/release.sh --push              # 打 tag 并推送，触发 GitHub Actio
 
 - 保持改动小而聚焦，沿用现有的即时 UI 写法和命名；新增界面优先复用 `app.go` 里的 `intro`、`iconTile`、`pill`、`primaryBtn`、`secondaryBtn`、`ghostBtn` 等部件。
 - 注释解释「为什么」，重点写平台差异、权限/TCC、剪贴板副作用、坐标换算、生命周期陷阱这类从代码看不出的背景。
+- 尺寸按 8 点栅格：间距只取 4 / 8 / 16 / 24，按钮和输入框高度统一 32、圆角 8、水平内边距 12（图片压缩窗口用 `tinyGap` / `tinyBtnHeight` / `tinyBtnRadius` / `tinyBtnPadX` 常量）；同一行里的按钮必须同高，不要再写 9 / 13 / 14 这种随手数值，窗口内容优先保证信息密度。
 - `README.md` 面向用户，只放功能、下载、权限说明；不要加入本机路径或安装章节。
 - 发布推送后不需要盯流水线，用户自己会看构建与 Release 结果。

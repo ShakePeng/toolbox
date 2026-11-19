@@ -11,6 +11,7 @@ require (
 )
 
 require (
+	github.com/gen2brain/webp v0.6.4 // indirect
 	github.com/go-text/typesetting v0.3.5 // indirect
 	golang.org/x/image v0.46.0 // indirect
 	golang.org/x/net v0.59.0 // indirect

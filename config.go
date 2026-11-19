@@ -91,6 +91,26 @@ func migrateConfig(cfg *Config) {
 		cfg.Settings.ScreenshotEnabled = true
 		cfg.Settings.HasCompletedOnboarding = true
 	}
+	// v11 新增图片压缩设置。这些字段在旧配置里全部不存在，可以安全补默认值。
+	if cfg.SchemaVersion < 11 {
+		cfg.Settings.ImageCompress = defaultImageCompressSettings()
+	}
+	// v12 给图片压缩补独立功能开关；v11 已保存的压缩参数和 Key 原样保留。
+	if cfg.SchemaVersion < 12 {
+		cfg.Settings.ImageCompress.Enabled = true
+	}
+	// v13 把 PNG 的 bool 勾选框换成 0–6 优化级别。老配置勾选过「最佳无损压缩」
+	// 直接映射到 6，没勾选映射到 0；全新配置走默认值 3，不需要改写。
+	if cfg.SchemaVersion < 13 {
+		if legacy := cfg.Settings.ImageCompress.LegacyPNGOptimize; legacy != nil {
+			if *legacy {
+				cfg.Settings.ImageCompress.PNGLevel = 6
+			} else {
+				cfg.Settings.ImageCompress.PNGLevel = 0
+			}
+		}
+		cfg.Settings.ImageCompress.LegacyPNGOptimize = nil
+	}
 	cfg.SchemaVersion = configSchemaVersion
 	cfg.Settings.SchemaVersion = configSchemaVersion
 

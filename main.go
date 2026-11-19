@@ -33,7 +33,12 @@ func main() {
 	mygo.App.OnWindowAllClosed(func() {})
 	// 退出前先记下来：窗口的 OnClose 里要区分“用户关窗（隐藏）”和“应用退出（真关）”，
 	// 否则 PreventDefault 会拦掉退出流程，导致点退出没反应。
-	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { a.quitting = true })
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
+		a.quitting = true
+		if a.compressor != nil {
+			a.compressor.cancel()
+		}
+	})
 	mygo.App.OnSecondInstance(func([]string, string) { a.showLauncher() })
 	mygo.App.WhenReady(a.ready)
 	if err := mygo.App.Run(); err != nil {

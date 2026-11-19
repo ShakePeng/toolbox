@@ -40,6 +40,7 @@ func TestRenderSnapshots(t *testing.T) {
 		{"settings_1080", "settings", 1080, 760, false},
 		{"overview_translate_expanded_1080", "overview", 1080, 1500, false},
 		{"overview_screenshot_expanded_1080", "overview", 1080, 1500, false},
+		{"overview_image_compress_expanded_1080", "overview", 1080, 1500, false},
 		{"modal_launcher_hotkey_1080", "overview", 1080, 760, false},
 		{"modal_provider_1080", "overview", 1080, 760, true},
 		// 收窄到最小窗口，验证堆叠/降列
@@ -74,6 +75,9 @@ func TestRenderSnapshots(t *testing.T) {
 		}
 		if s.name == "overview_screenshot_expanded_1080" {
 			a.launcherSourceExpanded = "screenshot"
+		}
+		if s.name == "overview_image_compress_expanded_1080" {
+			a.launcherSourceExpanded = "image-compress"
 		}
 		if s.name == "modal_launcher_hotkey_1080" {
 			a.configModal = "launcher-hotkey"
@@ -144,6 +148,43 @@ func TestRenderSnapshots(t *testing.T) {
 	fork.query = "fork "
 	fork.rebuildResults()
 	renderSession("launcher_fork_projects.png", fork)
+
+	// 图片压缩是独立窗口，分别检查空态、混合队列和设置页。
+	compressor := &imageCompressSession{app: newTestApp()}
+	compressor.syncSettingDrafts()
+	renderImageCompress("image_compress_empty.png", compressor)
+	compressor.items = []*imageCompressItem{
+		{ID: 1, SourcePath: "/tmp/example.png", Format: imageFormatPNG, OriginalSize: 240000, Data: make([]byte, 120000), Status: tinyDone, Selected: true},
+		{ID: 2, SourcePath: "/tmp/photo.jpg", Format: imageFormatJPEG, OriginalSize: 180000, Status: tinyProcessing},
+		{ID: 3, SourcePath: "/tmp/broken.webp", Format: imageFormatWebP, OriginalSize: 9000, Status: tinyError, Err: "读取图片失败"},
+	}
+	compressor.nextID = 3
+	renderImageCompress("image_compress_items.png", compressor)
+	settings := &imageCompressSession{app: newTestApp(), settingsOpen: true}
+	settings.syncSettingDrafts()
+	renderImageCompress("image_compress_settings.png", settings)
+	cloud := &imageCompressSession{app: newTestApp(), settingsOpen: true}
+	cloud.app.settings.ImageCompress.Engine = "tinypng"
+	cloud.app.settings.ImageCompress.TinyPNGKeys = []TinyPNGKey{{Key: "0123456789abcdef0123456789abcdef", Usage: 42}}
+	cloud.syncSettingDrafts()
+	renderImageCompress("image_compress_settings_cloud.png", cloud)
+}
+
+func renderImageCompress(name string, s *imageCompressSession) {
+	tt := ui.NewTester(s.view, 1000, 760)
+	tt.Frame()
+	img := tt.Image()
+	if img == nil {
+		panic("空快照：" + name)
+	}
+	f, err := os.Create(filepath.Join(os.TempDir(), "toolbox_render", name))
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		panic(err)
+	}
 }
 
 // renderSession 把一个启动器会话渲染成 PNG 快照。
