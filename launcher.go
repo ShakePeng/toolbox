@@ -885,8 +885,10 @@ func (a *app) homeFeaturesGroup(c *ui.Context) {
 					a.homeFeatureCard(c, features[j])
 				}
 				// 奇数项时补一个空块，最后一张卡片保持半宽、不会被拉满整行。
+				// 占位块要带上和卡片相同的横向内边距：Grow 的空闲空间按内容宽度
+				// 均分后再加上各自的 padding，不带 padding 的占位块会让卡片宽出 32。
 				if end-i < 2 {
-					ui.Box(c).Grow(1)
+					ui.Box(c).Grow(1).PaddingX(16)
 				}
 			})
 		}

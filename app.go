@@ -505,7 +505,9 @@ func (a *app) providerGridCols(c *ui.Context, cols int) {
 				a.providerCard(c, j).Basis(0).Grow(1)
 			}
 			for k := end - i; k < cols; k++ {
-				ui.Box(c).Basis(0).Grow(1)
+				// 占位块要带上和服务商卡片相同的横向内边距（卡片 Padding 18），
+				// 否则 Grow 均分后最后一行唯一的卡片会比占位块宽出 36。
+				ui.Box(c).Basis(0).Grow(1).PaddingX(18)
 			}
 		})
 	}

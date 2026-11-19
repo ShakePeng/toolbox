@@ -728,7 +728,9 @@ func (s *imageCompressSession) queueView(c *ui.Context) {
 						if i+1 < len(s.items) {
 							s.itemCard(c, s.items[i+1])
 						} else {
-							ui.Box(c).Grow(1)
+							// 占位块要带上和卡片相同的横向内边距，否则 Grow
+							// 均分后卡片会比占位块宽出一个 padding。
+							ui.Box(c).Grow(1).PaddingX(12)
 						}
 					})
 				}
