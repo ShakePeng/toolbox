@@ -43,6 +43,10 @@ func TestOverwriteTinyOriginal(t *testing.T) {
 	if err := os.WriteFile(source, original, 0640); err != nil {
 		t.Fatal(err)
 	}
+	originalInfo, err := os.Stat(source)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := overwriteTinyOriginal(source, imageFormatPNG, compressed); err != nil {
 		t.Fatal(err)
 	}
@@ -50,9 +54,13 @@ func TestOverwriteTinyOriginal(t *testing.T) {
 	if err != nil || !bytes.Equal(got, compressed) {
 		t.Fatalf("原图没有被替换：%v", err)
 	}
-	info, _ := os.Stat(source)
-	if info.Mode().Perm() != 0640 {
-		t.Fatalf("覆盖后应保留权限，实际 %v", info.Mode().Perm())
+	info, err := os.Stat(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Windows 只保留只读/可写语义，应比较覆盖前后的实际权限，而不是写入时请求的 0640。
+	if info.Mode().Perm() != originalInfo.Mode().Perm() {
+		t.Fatalf("覆盖后应保留权限，期望 %v，实际 %v", originalInfo.Mode().Perm(), info.Mode().Perm())
 	}
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != 1 {
