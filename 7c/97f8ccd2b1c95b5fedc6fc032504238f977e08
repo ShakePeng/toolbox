@@ -1,0 +1,19 @@
+image_compress_save_test.go
+  s_1502393c2203ff::t_7ad79dce8e6ba2 46-51,60-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "7c97f8ccd2b1c95b5fedc6fc032504238f977e08",
+  "prompts": {},
+  "sessions": {
+    "s_1502393c2203ff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "648f3200-52f5-4a59-a724-8a93a9ece1d5",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
