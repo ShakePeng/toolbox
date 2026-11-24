@@ -9,15 +9,27 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-func TestTinyBuiltinCommandMatching(t *testing.T) {
-	for _, query := range []string{"tiny", "图片压缩"} {
-		cmd, _, ok := matchBuiltinCommand(query)
-		if !ok || cmd.ID != cmdTiny {
-			t.Errorf("%q 应匹配图片压缩，实际 %+v, %v", query, cmd, ok)
+// tiny 不再是内置命令：触发词由 ImageCompressSettings.Command 配置，
+// 匹配走 launcherActions 的图片压缩触发行，冲突校验不再把它算进内置命令。
+func TestTinyTriggerWordMatching(t *testing.T) {
+	a := newTestApp()
+	a.settings.ImageCompress = defaultImageCompressSettings()
+	if got := a.imageCompressCommand(); got != "tiny" {
+		t.Errorf("默认触发词应为 tiny，实际 %q", got)
+	}
+	if isBuiltinCommand("tiny") {
+		t.Error("tiny 已移出内置命令表，不应再被 isBuiltinCommand 命中")
+	}
+	s := &launcherSession{app: a, query: "ti"}
+	actions := s.launcherActions()
+	found := false
+	for _, it := range actions {
+		if it.action == launcherActionImageCompress && it.path == "launcher-action-image-compress" {
+			found = true
 		}
 	}
-	if !isBuiltinCommand("tiny") || isBuiltinCommand("tin") {
-		t.Error("触发词冲突校验只接受完整 tiny")
+	if !found {
+		t.Errorf("输入 ti 应出现图片压缩触发行，实际 %+v", actions)
 	}
 }
 
@@ -142,8 +154,30 @@ func TestConfigMigrationAddsImageCompressDefaults(t *testing.T) {
 	if got.Engine != "local" || !got.Enabled || got.JPEGQuality != 80 || got.WebPQuality != 80 || got.PNGLevel != 3 || got.MaxEdge != 0 {
 		t.Fatalf("v10→v13 默认值不正确：%+v", got)
 	}
-	if cfg.SchemaVersion != 13 {
-		t.Fatalf("版本应升到 13，实际 %d", cfg.SchemaVersion)
+	if cfg.SchemaVersion != 14 {
+		t.Fatalf("版本应升到 14，实际 %d", cfg.SchemaVersion)
+	}
+}
+
+// v14 起图片压缩的触发词从内置命令变成用户配置，老配置补默认值 tiny。
+func TestConfigMigrationAddsImageCompressCommand(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.SchemaVersion = 13
+	cfg.Settings.SchemaVersion = 13
+	cfg.Settings.ImageCompress.Command = ""
+	migrateConfig(&cfg)
+	if cfg.Settings.ImageCompress.Command != "tiny" {
+		t.Fatalf("v13→v14 应补默认触发词 tiny，实际 %q", cfg.Settings.ImageCompress.Command)
+	}
+
+	// v13 起版本统一升到当前值，但用户已改过的触发词不能被覆盖。
+	cfg = defaultConfig()
+	cfg.SchemaVersion = 14
+	cfg.Settings.SchemaVersion = 14
+	cfg.Settings.ImageCompress.Command = "img"
+	migrateConfig(&cfg)
+	if cfg.Settings.ImageCompress.Command != "img" {
+		t.Fatalf("v14 用户自定义触发词不应被覆盖：%q", cfg.Settings.ImageCompress.Command)
 	}
 }
 
@@ -197,11 +231,54 @@ func TestImageCompressFeatureCardAndCommandSwitch(t *testing.T) {
 	}
 
 	s := &launcherSession{app: a, query: "tiny"}
-	if got := s.launcherActions(); len(got) != 1 || got[0].command != cmdTiny {
-		t.Fatalf("开启时应显示 tiny 命令：%+v", got)
+	got := s.launcherActions()
+	hasTiny := len(got) == 1 && got[0].action == launcherActionImageCompress
+	if !hasTiny {
+		t.Fatalf("开启时应显示 tiny 触发行：%+v", got)
 	}
 	a.settings.ImageCompress.Enabled = false
 	if got := s.launcherActions(); len(got) != 0 {
-		t.Fatalf("关闭后应隐藏 tiny 命令：%+v", got)
+		t.Fatalf("关闭后应隐藏 tiny 触发行：%+v", got)
+	}
+}
+
+// 功能卡片标题旁应外显唤起方式：快捷键 pill、触发词 pill，图片压缩是
+// 可编辑触发词输入框；网页搜索多引擎无单一触发词，不外显。
+func TestHomeFeatureTriggerPills(t *testing.T) {
+	a := newTestApp()
+	a.settings.HasCompletedOnboarding = true
+	a.settings.Hotkeys = defaultHotkeys()
+	a.settings.LauncherVSCodeCommand = "code"
+	a.settings.LauncherTraeCommand = "trae"
+	a.settings.LauncherForkCommand = "fork"
+	tt := ui.NewTester(a.view, 1100, 1500)
+	tt.Frame()
+	for _, text := range []string{"快捷键 ⌥D", "快捷键 F1", "触发词 code", "触发词 trae", "触发词 fork"} {
+		if !tt.HasText(text) {
+			t.Errorf("功能中心缺少外显 %q", text)
+		}
+	}
+	// 图片压缩的触发词 pill 与其他功能同一形态（只读），编辑入口在设置弹框。
+	if !tt.HasText("触发词 tiny") {
+		t.Error("图片压缩卡片应有触发词 pill")
+	}
+}
+
+// 改图片压缩触发词：正常保存生效；与内置命令/快速打开触发词冲突时
+// 回退默认 tiny 并给出原因。
+func TestImageCompressCommandConflict(t *testing.T) {
+	a := newTestApp()
+	a.settings.LauncherWebSearchEngines = []LauncherSearchEngine{{Name: "百度", Command: "bd", URL: "https://www.baidu.com/s?wd=%s"}}
+	if reason := a.imageCompressCommandConflict("settings"); reason == "" {
+		t.Error("与内置命令重名应返回冲突原因")
+	}
+	if reason := a.imageCompressCommandConflict("code"); reason == "" {
+		t.Error("与 VS Code 触发词重名应返回冲突原因")
+	}
+	if reason := a.imageCompressCommandConflict("bd"); reason == "" {
+		t.Error("与网页搜索触发词重名应返回冲突原因")
+	}
+	if reason := a.imageCompressCommandConflict("img"); reason != "" {
+		t.Errorf("未冲突的触发词不应报错：%q", reason)
 	}
 }

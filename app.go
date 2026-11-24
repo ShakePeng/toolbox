@@ -502,10 +502,15 @@ func (a *app) providerGridCols(c *ui.Context, cols int) {
 		end := min(i+cols, len(a.providers))
 		ui.Row(c).Gap(14).AlignItems(ui.Stretch).Children(func() {
 			for j := i; j < end; j++ {
-				a.providerCard(c, j).Basis(0).Grow(1)
+				a.providerCard(c, j).Grow(1)
 			}
+			// 占位块必须复刻卡片的主轴基准：flex 布局把基准下限钳到
+			// padding+border，providerCard 自带 38px 基准而裸 Box 是 0，
+			// 末行卡片会多分半个基准的宽度、比其他行长 19px。透明边框
+			// 不参与绘制，只贡献基准。Basis(0) 在此冗余：Grow 会把
+			// basis 置 0%，写了也压不过 padding+border 的下限。
 			for k := end - i; k < cols; k++ {
-				ui.Box(c).Basis(0).Grow(1)
+				ui.Box(c).Padding(18).Border(1, ui.Color{}).Grow(1)
 			}
 		})
 	}
@@ -675,6 +680,8 @@ func (a *app) permissionStrip(c *ui.Context, title, desc, kind string, ok bool) 
 	})
 }
 
+// hotkeyRecorder 录快捷键的完整行：标题独占一行，输入框加录制按钮。
+// 弹框里的紧凑并排版用 compactHotkeyRow。
 func (a *app) hotkeyRecorder(c *ui.Context, slot string) {
 	recording := a.recording == slot
 	label := formatHotkey(a.currentHotkey(slot))
@@ -691,7 +698,7 @@ func (a *app) hotkeyRecorder(c *ui.Context, slot string) {
 				ui.Text(c, label).FontSize(13).TextColor(tc)
 			})
 			if recording {
-				if secondaryBtn(c, "取消").Clicked() {
+				if secondaryBtn(c, "取消", btnDanger).Clicked() {
 					a.stopRecording()
 				}
 				if acc, ok := captureHotkey(c); ok {
@@ -710,11 +717,72 @@ func (a *app) hotkeyRecorder(c *ui.Context, slot string) {
 						}
 					}
 				}
-			} else if secondaryBtn(c, "录制").Clicked() {
+			} else if secondaryBtn(c, "录制", btnConfirm).Clicked() {
 				a.startRecording(slot)
 			}
 		})
 	})
+}
+
+// compactHotkeyRow 是弹框里的紧凑版快捷键行：标签放在同一行左侧，
+// 录制输入框占剩余宽度，和 langSelectRow 拼成一行两字段。
+func (a *app) compactHotkeyRow(c *ui.Context, slot string) {
+	recording := a.recording == slot
+	label := formatHotkey(a.currentHotkey(slot))
+	tc := colText
+	if recording {
+		label = "按下新的组合键…"
+		tc = colAccentStr
+	}
+	ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
+		ui.Text(c, "快捷键").FontSize(11).Bold().TextColor(colTextSoft)
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).Grow(1).Height(40).Padding(0, 12).Radius(10).Background(colBg).
+				Border(1, colLine).Children(func() {
+				ui.Text(c, label).FontSize(13).TextColor(tc)
+			})
+			if recording {
+				if secondaryBtn(c, "取消", btnDanger).Clicked() {
+					a.stopRecording()
+				}
+				if acc, ok := captureHotkey(c); ok {
+					a.setHotkey(slot, acc)
+					a.stopRecording()
+					switch err := a.persist(); {
+					case err != nil:
+						a.toast("保存失败：" + err.Error())
+					default:
+						if other, ok := a.findHotkeyConflict(slot); ok {
+							a.toast("提示：该快捷键与「" + other + "」重复，可能相互冲突")
+						} else {
+							a.toast("快捷键已更新：" + formatHotkey(acc))
+						}
+					}
+				}
+			} else if secondaryBtn(c, "录制", btnConfirm).Clicked() {
+				a.startRecording(slot)
+			}
+		})
+	})
+}
+
+// compactLangSelect 是弹框里的紧凑版语言选择：与完整版的落盘逻辑一致，
+// 只是宽度跟随所在行分配，不再独占 100%。
+func (a *app) compactLangSelect(c *ui.Context) {
+	labels := make([]string, len(targetLangOptions))
+	for i, o := range targetLangOptions {
+		labels[i] = o.Label
+	}
+	ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
+		ui.Text(c, "默认目标语言").FontSize(11).Bold().TextColor(colTextSoft)
+		ui.Select(c, &a.langSel, labels).WidthPercent(100).Height(40).Label("默认目标语言")
+	})
+	if a.settings.TargetLang != langCode(a.langSel) {
+		a.settings.TargetLang = langCode(a.langSel)
+		if err := a.persist(); err != nil {
+			a.toast("保存失败：" + err.Error())
+		}
+	}
 }
 
 func (a *app) langSelect(c *ui.Context) {
@@ -748,13 +816,45 @@ func pill(c *ui.Context, text string, bg, fg ui.Color) {
 	})
 }
 
+// primaryBtn 是弹框与页面共用的主按钮：深色实底（深色主题里近黑、
+// 浅色弹框里被调色板换成 colPrimaryTxt 的深灰 #18181a），白字。
+// 曾试过品牌琥珀底，视觉上太跳、盖过了内容，退回深色。
 func primaryBtn(c *ui.Context, label string) ui.Element {
-	return ui.Button(c, label).Background(colText).TextColor(colPrimaryTxt).Bold().
-		MinHeight(38).Radius(10).Padding(0, 16)
+	return ui.Button(c, label).Background(colPrimaryTxt).TextColor(colText).
+		Bold().MinHeight(38).Radius(10).Padding(0, 16)
 }
 
-func secondaryBtn(c *ui.Context, label string) ui.Element {
-	return ui.Button(c, label).Background(ui.RGBA(255, 255, 255, 0.055)).
+// btnStyle 是 secondaryBtn 的预设档位。secondaryBtn 有大量使用点，
+// 一处一处改太散；档位集中在这里，浅色弹框与深色页面共用一套语义。
+type btnStyle struct {
+	bg   ui.Color
+	fg   ui.Color
+	desc string
+}
+
+// 按钮预设：默认灰底（中性动作）、确认（深色实底，同 primaryBtn 语义但
+// 用在次级动作上）、危险（红底，破坏性操作如取消录制）。
+// 深浅主题都走 col* 变量：浅色调色板会换成对应浅色档（见 withLightPalette）。
+var (
+	btnDefault = btnStyle{bg: colBgSoft, fg: colText, desc: "中性"}
+	btnConfirm = btnStyle{bg: colPrimaryTxt, fg: colText, desc: "确认"}
+	btnDanger  = btnStyle{bg: colDanger, fg: ui.Hex("#ffffff"), desc: "危险"}
+)
+
+// secondaryBtn 是次级动作按钮，style 选预设色：
+//
+//	secondaryBtn(c, "添加文件夹")                    → 中性灰底
+//	secondaryBtn(c, "重新检测", btnConfirm)           → 深色实底
+//	secondaryBtn(c, "取消", btnDanger)                → 红底
+//
+// 不传 style 时默认中性档。不再使用只有边框+微透明底的样式：
+// 实底在深浅两种主题里都更清晰，也和 primaryBtn 拉开层次。
+func secondaryBtn(c *ui.Context, label string, style ...btnStyle) ui.Element {
+	st := btnDefault
+	if len(style) > 0 {
+		st = style[0]
+	}
+	return ui.Button(c, label).Background(st.bg).TextColor(st.fg).
 		Border(1, colLine).MinHeight(38).Radius(10).Padding(0, 16)
 }
 

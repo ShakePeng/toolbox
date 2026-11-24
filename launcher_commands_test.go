@@ -17,12 +17,11 @@ func TestMatchBuiltinCommand(t *testing.T) {
 		{"重建", cmdReindex, "", true},
 		{"索引", cmdReindex, "", true},
 		{"reindex now", cmdReindex, "now", true},
-		// settings 里也含 "tin"，前缀命中必须排在子串命中前面。
-		{"tin", cmdTiny, "", true},
-		{"tiny", cmdTiny, "", true},
-		{"图片", cmdTiny, "", true},
-		{"压缩", cmdTiny, "", true},
-		{"image", cmdTiny, "", true},
+		// tiny 已移出内置命令表，改由 ImageCompressSettings.Command 配置匹配。
+		{"tin", builtinCommandID(""), "", false},
+		{"tiny", builtinCommandID(""), "", false},
+		{"图片", builtinCommandID(""), "", false},
+		{"压缩", builtinCommandID(""), "", false},
 		{"set", cmdSettings, "", true},
 		{"设置", cmdSettings, "", true},
 		{"退出", cmdQuit, "", true},

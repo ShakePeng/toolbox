@@ -33,6 +33,8 @@ const (
 	launcherActionProject
 	// launcherActionWebSearch 进入某个搜索引擎的搜索模式。
 	launcherActionWebSearch
+	// launcherActionImageCompress 打开图片压缩窗口（触发词由用户配置）。
+	launcherActionImageCompress
 )
 
 // launcherItem 是浮窗列表里的一行。

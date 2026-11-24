@@ -111,6 +111,12 @@ func migrateConfig(cfg *Config) {
 		}
 		cfg.Settings.ImageCompress.LegacyPNGOptimize = nil
 	}
+	// v14 起图片压缩的 tiny 触发词变成用户可改的配置；老用户按默认 tiny 补齐。
+	if cfg.SchemaVersion < 14 {
+		if strings.TrimSpace(cfg.Settings.ImageCompress.Command) == "" {
+			cfg.Settings.ImageCompress.Command = "tiny"
+		}
+	}
 	cfg.SchemaVersion = configSchemaVersion
 	cfg.Settings.SchemaVersion = configSchemaVersion
 

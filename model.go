@@ -10,7 +10,7 @@ import (
 
 // configSchemaVersion 是落盘配置的版本。迁移必须按版本逐级判断，
 // 不能只看“小于当前版本”，否则升级到 v3 会把 v2 用户的搜索源选择覆盖掉。
-const configSchemaVersion = 13
+const configSchemaVersion = 14
 
 // HotkeySettings 是各插件绑定的全局快捷键（accelerator 字符串）。
 type HotkeySettings struct {
@@ -79,6 +79,10 @@ type ImageCompressSettings struct {
 	WebPQuality int          `json:"webpQuality"`
 	MaxEdge     int          `json:"maxEdge"`
 	TinyPNGKeys []TinyPNGKey `json:"tinyPngKeys"`
+	// Command 是启动器里的唤起触发词，输入「触发词 + 空格」不再进项目模式，
+	// 直接回车也开压缩窗口；与其他内置触发词（内置命令、VS Code 等）冲突时
+	// 保存会回退默认值 tiny。
+	Command string `json:"command"`
 	// PNGLevel 是 0–6 的 PNG 优化级别：0 不优化、6 压缩率最高但最慢。
 	PNGLevel int `json:"pngLevel"`
 	// LegacyPNGOptimize 是旧版「PNG 使用最佳无损压缩」勾选框，只在 v12→v13 迁移时读取，
@@ -88,7 +92,7 @@ type ImageCompressSettings struct {
 
 func defaultImageCompressSettings() ImageCompressSettings {
 	return ImageCompressSettings{
-		Engine: "local", Enabled: true, JPEGQuality: 80, WebPQuality: 80, PNGLevel: 3,
+		Engine: "local", Enabled: true, Command: "tiny", JPEGQuality: 80, WebPQuality: 80, PNGLevel: 3,
 	}
 }
 

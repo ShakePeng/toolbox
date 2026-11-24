@@ -81,3 +81,39 @@ func scaledSize(width, height, maxEdge int) (int, int) {
 	}
 	return max(1, int(float64(width)*float64(maxEdge)/float64(height)+0.5)), maxEdge
 }
+
+// imageCompressCommand 读取图片压缩的启动器触发词，留空或与内置命令
+// 冲突时退回默认值 tiny。触发词此前是内置命令 tiny，v14 起改为用户配置。
+func (a *app) imageCompressCommand() string {
+	if a == nil {
+		return "tiny"
+	}
+	cmd := strings.TrimSpace(a.settings.ImageCompress.Command)
+	if cmd == "" || isBuiltinCommand(cmd) {
+		return "tiny"
+	}
+	return cmd
+}
+
+// imageCompressCommandConflict 校验图片压缩触发词是否与内置命令、快速
+// 打开触发词或搜索引擎触发词重名；返回空串表示可用。
+func (a *app) imageCompressCommandConflict(command string) string {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return ""
+	}
+	if isBuiltinCommand(command) {
+		return "“" + command + "”是内置命令，不能作为图片压缩触发词"
+	}
+	for _, reserved := range []string{a.vscodeCommand(), a.traeCommand(), a.forkCommand()} {
+		if strings.EqualFold(command, reserved) {
+			return "“" + command + "”已被快速打开触发词占用"
+		}
+	}
+	for _, eng := range a.settings.LauncherWebSearchEngines {
+		if strings.EqualFold(strings.TrimSpace(eng.Command), command) {
+			return "“" + command + "”已被网页搜索触发词占用"
+		}
+	}
+	return ""
+}

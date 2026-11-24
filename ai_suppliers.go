@@ -209,7 +209,8 @@ func (a *app) aiSection(c *ui.Context) {
 		}
 	})
 	ui.Row(c).Children(func() {
-		if secondaryBtn(c, "添加供应商").Clicked() {
+		// 新增入口用确认档：这是页面最主要的主动操作。
+		if secondaryBtn(c, "添加供应商", btnConfirm).Clicked() {
 			a.openAISupplier(-1)
 		}
 	})
@@ -386,7 +387,8 @@ func (a *app) aiSupplierModal(c *ui.Context) {
 				ui.Checkbox(c, &d.Enabled, "启用此供应商")
 				ui.Spacer(c)
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					if ghostBtn(c, "取消").Clicked() {
+					// 同 provider 编辑弹窗：取消从 ghost 升到实底，三档按钮一行对齐。
+					if secondaryBtn(c, "取消").Clicked() {
 						a.aiDraft = nil
 					}
 					if primaryBtn(c, "保存").Clicked() {
@@ -478,7 +480,7 @@ func (a *app) aiSupplierModelPicker(c *ui.Context, d *aiSupplierDraft) {
 					Placeholder("手动添加，如 gpt-4o").Height(36).Grow(1); in.Changed() {
 					// 输入过程中只更新草稿，点「添加」才进入列表。
 				}
-				if secondaryBtn(c, "添加").Label("手动添加模型").Clicked() {
+				if secondaryBtn(c, "添加", btnConfirm).Label("手动添加模型").Clicked() {
 					d.addModel(d.NewModel)
 					d.NewModel = ""
 				}

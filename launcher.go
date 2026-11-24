@@ -73,6 +73,13 @@ type launcherSession struct {
 	shownAt   time.Time
 	hiddenAt  time.Time
 	hidByBlur bool
+	// 唤起瞬间的前台应用是否 Finder/资源管理器。浮窗一 Show 就会抢焦点，
+	// 之后 Run 时再查前台只能看到本应用，所以必须在 Show 之前记录；
+	// Finder/Explorer 的选区不依赖前台，可以延后到回车 tiny 后再读。
+	summonedFromFileManager bool
+	// Windows 上是唤起时资源管理器窗口的 HWND（选区挂在窗口上，要按它找回）；
+	// macOS 恒 0，Finder 选区是全局状态。
+	fileManagerWindow uintptr
 	// lastHeight 避免每次按键都对窗口做一次无变化的 SetSize。
 	lastHeight int
 }
@@ -147,6 +154,10 @@ func (s *launcherSession) show() {
 	s.projectErrs = nil
 	s.projectRootsSig = ""
 	s.rebuildResults()
+
+	// 必须在 Show 之前取：Show+Focus 之后前台就变成自己了。
+	// 每次唤起都会走到这里覆盖旧值，不会读到上一次的记录。
+	s.summonedFromFileManager, s.fileManagerWindow = fileManagerForeground()
 
 	s.position()
 	// 先记时间再 Show：个别平台上失焦事件可能在 Show 返回前同步到达，
@@ -359,6 +370,18 @@ func (s *launcherSession) launcherActions() []launcherItem {
 			path:     "launcher-action-project-" + src.id,
 		})
 	}
+	// 图片压缩的触发词与项目触发词同一套规则：前缀命中就提示，回车开窗口。
+	if s.app.settings.ImageCompress.Enabled {
+		if prefix := s.app.imageCompressCommand(); strings.HasPrefix(strings.ToLower(prefix), strings.ToLower(q)) {
+			items = append(items, launcherItem{
+				kind:     launcherKindAction,
+				action:   launcherActionImageCompress,
+				title:    "打开图片压缩",
+				subtitle: "当前触发词 " + prefix + "，回车打开压缩窗口",
+				path:     "launcher-action-image-compress",
+			})
+		}
+	}
 	for _, eng := range s.app.webSearchEngines() {
 		prefix := strings.TrimSpace(eng.Command)
 		if prefix == "" || !strings.HasPrefix(strings.ToLower(prefix), strings.ToLower(q)) {
@@ -409,6 +432,32 @@ func (s *launcherSession) runBuiltin(item launcherItem) {
 	if !cmd.KeepOpen {
 		s.hide()
 	}
+}
+
+// runImageCompressCommand 执行图片压缩触发行：开窗后若本次唤起来自
+// 文件管理器，再异步读取选区带入队列。
+func (s *launcherSession) runImageCompressCommand() {
+	s.app.showImageCompressor()
+	if s.summonedFromFileManager {
+		// 选区是一次几十到几百毫秒的外部调用（osascript/PowerShell），
+		// 先开窗、后台带入，避免回车后浮窗卡住等它。
+		go s.app.enqueueFileManagerSelection(s.fileManagerWindow)
+	}
+	s.hide()
+}
+
+// completeImageCompressCommand 把输入补全成「触发词 + 空格」，重建输入框
+// 让光标落在末尾。图片压缩不进项目模式，空格后回车仍直接开窗。
+func (s *launcherSession) completeImageCompressCommand() {
+	prefix := s.app.imageCompressCommand()
+	if prefix == "" {
+		return
+	}
+	s.query = prefix + " "
+	s.inputSeq++
+	s.selected = 0
+	s.notice = ""
+	s.rebuildResults()
 }
 
 // desiredHeight 让浮窗跟着结果数量伸缩：空查询只占搜索框，
@@ -527,6 +576,15 @@ func (s *launcherSession) activate(i int) {
 			s.rebuildResults()
 		case launcherActionWebSearch:
 			s.completeWebSearch(item.project)
+		case launcherActionImageCompress:
+			// 触发词完整回车时直接开窗；若只输入了前缀，先补全触发词再等回车，
+			// 与项目触发词的提示行为一致。
+			prefix := s.app.imageCompressCommand()
+			if strings.TrimSpace(strings.ToLower(s.query)) == strings.ToLower(prefix) {
+				s.runImageCompressCommand()
+			} else {
+				s.completeImageCompressCommand()
+			}
 		}
 		return
 	}
@@ -885,8 +943,12 @@ func (a *app) homeFeaturesGroup(c *ui.Context) {
 					a.homeFeatureCard(c, features[j])
 				}
 				// 奇数项时补一个空块，最后一张卡片保持半宽、不会被拉满整行。
+				// 占位块必须复刻卡片的主轴基准：flex 布局把基准下限钳到
+				// padding+border，卡片自带 34px 基准而裸 Box 是 0，末行
+				// 卡片会多分得半个基准的宽度、比其他行长 17px。透明边框
+				// 不参与绘制，只贡献基准。
 				if end-i < 2 {
-					ui.Box(c).Grow(1)
+					ui.Box(c).Padding(16).Border(1, ui.Color{}).Grow(1)
 				}
 			})
 		}
@@ -895,8 +957,12 @@ func (a *app) homeFeaturesGroup(c *ui.Context) {
 
 // homeFeatureCard 画一张功能卡片。整张卡片不可点击：开关负责启停，
 // 齿轮负责配置，两者分开避免点开关时误开弹框。
+// 有触发词或快捷键的功能在标题行外显一个带前缀的 pill（快捷键 ⌥D、触发词 tiny），
+// 用户不进设置就能看到唤起方式；图片压缩的触发词直接在 pill 处可编辑。
 func (a *app) homeFeatureCard(c *ui.Context, f homeFeature) {
-	ui.Column(c.Key("home-feature-"+f.id)).Grow(1).MinWidth(0).Padding(16).Radius(12).
+	// Basis(0) 与 Grow 配合按权重均分行宽（Grow 本身也会把 basis 置 0%），
+	// 但布局会把基准下限钳到 padding+border（见 homeFeaturesGroup 占位块注释）。
+	ui.Column(c.Key("home-feature-"+f.id)).Basis(0).Grow(1).MinWidth(0).Padding(16).Radius(12).
 		Background(colBg).Border(1, colLine).Children(func() {
 		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 			if toolIcon := launcherToolIcons[f.id]; toolIcon != nil {
@@ -907,6 +973,7 @@ func (a *app) homeFeatureCard(c *ui.Context, f homeFeature) {
 			ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, f.title).FontSize(13).Bold()
+					a.homeFeatureTriggerPill(c, f)
 					// 不开设置也能看到是否真的生效，避免开了开关却一直没配置。
 					if badge, tone := a.launcherSourceBadge(f.id); badge != "" {
 						badgeBg, badgeFg := colBgSoft, colTextMuted
@@ -973,6 +1040,59 @@ func homeFeatureIcon(id string) string {
 	return "app"
 }
 
+// homeFeatureTriggerPill 在功能卡片标题后外显唤起方式：有快捷键的显示
+// 「快捷键 ⌥D」，有触发词的显示「触发词 code」，用户不进设置就能看到
+// 怎么唤起。所有 pill 都是只读展示，编辑入口统一在设置弹框；网页搜索
+// 有多个引擎没有单一触发词，不外显。
+func (a *app) homeFeatureTriggerPill(c *ui.Context, f homeFeature) {
+	switch f.id {
+	case "translate":
+		pill(c, "快捷键 "+formatHotkey(a.settings.Hotkeys.Translate), colBgSoft, colTextMuted)
+	case "screenshot":
+		pill(c, "快捷键 "+formatHotkey(a.settings.Hotkeys.Screenshot), colBgSoft, colTextMuted)
+	case "image-compress":
+		pill(c, "触发词 "+a.imageCompressCommand(), colBgSoft, colTextMuted)
+	case "vscode", "trae", "fork":
+		pill(c, "触发词 "+a.featureCommand(f.id), colBgSoft, colTextMuted)
+	}
+}
+
+// featureCommand 读快速打开功能当前生效的触发词，留空回退默认。
+func (a *app) featureCommand(id string) string {
+	switch id {
+	case "vscode":
+		return a.vscodeCommand()
+	case "trae":
+		return a.traeCommand()
+	case "fork":
+		return a.forkCommand()
+	}
+	return ""
+}
+
+// imageCompressCommandRow 渲染图片压缩触发词编辑行：与 VS Code 等快速打开
+// 的 projectCommandRow 同构，但省去命令探测状态，只负责改词与冲突校验。
+func (a *app) imageCompressCommandRow(c *ui.Context) {
+	ui.Column(c).Gap(7).Children(func() {
+		ui.Text(c, "触发词").FontSize(11).Bold().TextColor(colTextSoft)
+		in := ui.TextInput(c.Key("image-compress-command"), &a.settings.ImageCompress.Command).
+			Placeholder("tiny").Label("图片压缩触发词").Height(40).WidthPercent(100)
+		if in.Changed() {
+			// 触发词在浮窗里必须唯一，被占用时「命令 + 回车」会被别的功能截走，
+			// 所以回退默认触发词并提示，处理方式与快速打开触发词一致。
+			if reason := a.imageCompressCommandConflict(a.settings.ImageCompress.Command); reason != "" {
+				a.settings.ImageCompress.Command = "tiny"
+				a.afterImageCompressCommandChange()
+				a.toast(reason)
+				return
+			}
+			a.afterImageCompressCommandChange()
+		}
+	})
+	ui.Text(c, "示例：输入 "+a.imageCompressCommand()+" 后回车，打开图片压缩窗口。").
+		FontSize(11).TextColor(colTextMuted)
+}
+
 // featureModalView 渲染功能设置弹框：卡片上的齿轮从这里打开，一次只开一个。
 func (a *app) featureModalView(c *ui.Context) {
 	if a.featureModal == "" {
@@ -981,9 +1101,11 @@ func (a *app) featureModalView(c *ui.Context) {
 	id := a.featureModal
 	open := true
 	lightModal(c, &open, func() {
-		ui.Column(c).Width(620).Gap(16).Padding(4).Children(func() {
+		// 弹框加宽到 760：翻译设置里快捷键与目标语言并排、三张服务商
+		// 卡片一行放下（见 featureSettingsBody），内容不再依赖滚动。
+		ui.Column(c).Width(760).Gap(16).Padding(4).Children(func() {
 			a.featureModalHeader(c, homeFeatureTitle(id))
-			// 内容可能很长（翻译服务商网格、项目文件夹列表），超出部分滚动。
+			// 内容可能很长（项目文件夹列表），超出部分滚动。
 			ui.Scroll(c).MaxHeight(560).Children(func() {
 				ui.Column(c).Gap(16).Children(func() {
 					a.featureSettingsBody(c, id)
@@ -1041,14 +1163,17 @@ func (a *app) featureSettingsBody(c *ui.Context, id string) {
 				FontSize(12).TextColor(colTextMuted)
 			return
 		}
-		a.hotkeyRecorder(c, "translate")
-		a.langSelect(c)
+		// 快捷键和目标语言并排一行：两个都是短字段，分两行浪费弹框高度。
+		ui.Row(c).Gap(16).AlignItems(ui.Start).Children(func() {
+			a.compactHotkeyRow(c, "translate")
+			a.compactLangSelect(c)
+		})
 		// 只有 macOS 需要系统授权；Windows 读取选区走模拟 Ctrl+C，没有授权概念。
 		if runtime.GOOS == "darwin" {
 			a.permissionStrip(c, "辅助功能权限", "用于读取当前应用中被选中的文本。", "accessibility", permissions().Accessibility)
 		}
-		// 弹框宽度固定，服务商网格直接按两列排。
-		a.providerGridCols(c, 2)
+		// 弹框加宽后三张服务商卡片一行放下；奇数时占位块补齐等宽。
+		a.providerGridCols(c, 3)
 		if primaryBtn(c, "翻译剪贴板").Clicked() {
 			a.translateClipboard()
 		}
@@ -1067,10 +1192,11 @@ func (a *app) featureSettingsBody(c *ui.Context, id string) {
 		}
 	case "image-compress":
 		if !a.settings.ImageCompress.Enabled {
-			ui.Text(c, "开启后在启动器输入 tiny，或从这里打开图片压缩窗口。").
+			ui.Text(c, "开启后在启动器输入 "+a.imageCompressCommand()+"，或从这里打开图片压缩窗口。").
 				FontSize(12).TextColor(colTextMuted)
 			return
 		}
+		a.imageCompressCommandRow(c)
 		ui.Text(c, "支持批量选择或拖入图片、质量与最长边调整、单张另存、覆盖原图和 ZIP 打包。").
 			FontSize(12).TextColor(colTextSoft)
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
@@ -1360,7 +1486,8 @@ func (a *app) projectCommandRow(c *ui.Context, t projectTool) {
 		ui.Icon(c, icon(name)).FontSize(14).TextColor(color)
 		ui.Text(c, t.status).Grow(1).MinWidth(0).FontSize(12).
 			TextColor(color).MaxLines(2)
-		if secondaryBtn(c, "重新检测").Label(t.label + " 重新检测").Clicked() {
+		// 主动操作用确认档琥珀底，和状态提示里的中性灰拉开层次。
+		if secondaryBtn(c, "重新检测", btnConfirm).Label(t.label + " 重新检测").Clicked() {
 			t.onRetry()
 		}
 	})
@@ -1386,7 +1513,7 @@ func (a *app) projectFolderSection(c *ui.Context, t projectTool) {
 			ui.Text(c, "只扫描每个文件夹的下一级目录，可添加多个。").
 				FontSize(11).TextColor(colTextMuted)
 		})
-		if secondaryBtn(c, "添加文件夹").Label(t.label + " 添加文件夹").Clicked() {
+		if secondaryBtn(c, "添加文件夹", btnConfirm).Label(t.label + " 添加文件夹").Clicked() {
 			t.onPick()
 		}
 	})

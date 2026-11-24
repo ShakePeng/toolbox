@@ -13,7 +13,6 @@ type builtinCommandID string
 
 const (
 	cmdReindex  builtinCommandID = "reindex"
-	cmdTiny     builtinCommandID = "tiny"
 	cmdUpdate   builtinCommandID = "update"
 	cmdAI       builtinCommandID = "ai"
 	cmdSettings builtinCommandID = "settings"
@@ -50,15 +49,8 @@ func builtinCommandTable() []builtinCommand {
 			},
 		},
 		{
-			ID: cmdTiny, Names: []string{"tiny", "图片压缩"},
-			Title: "图片压缩", Desc: "批量压缩 PNG / JPEG / WebP，支持本地与 TinyPNG", Icon: "image-compress",
-			Keywords: []string{"image", "tinypng", "压缩"},
-			Run: func(s *launcherSession, arg string) error {
-				s.app.showImageCompressor()
-				return nil
-			},
-		},
-		{
+			// 图片压缩不再是内置命令：触发词 tiny 移到 ImageCompressSettings.Command
+			// 由用户配置（见 imageCompressCommand / launcherActions）。
 			ID: cmdAI, Names: []string{"ai", "供应商", "AI供应商"},
 			Title: "AI 供应商", Desc: "管理 OpenAI 兼容的供应商与模型", Icon: "provider",
 			Keywords: []string{"supplier", "模型"},
@@ -99,9 +91,6 @@ func builtinCommandTable() []builtinCommand {
 
 // enabled 是纯函数，渲染与执行共用；功能关闭时旧结果也不能再被回车执行。
 func (c builtinCommand) enabled(a *app) bool {
-	if c.ID == cmdTiny && a != nil {
-		return a.settings.ImageCompress.Enabled
-	}
 	return true
 }
 

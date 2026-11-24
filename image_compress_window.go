@@ -177,7 +177,19 @@ func (a *app) afterImageCompressToggle() {
 	if a.settings.ImageCompress.Enabled {
 		a.toast("图片压缩已开启")
 	} else {
-		a.toast("图片压缩已关闭，tiny 命令已停用")
+		a.toast("图片压缩已关闭，触发词已停用")
+	}
+}
+
+// afterImageCompressCommandChange 在功能中心外层卡片上改触发词后保存，
+// 并让已打开的启动器浮窗重新匹配新触发词。
+func (a *app) afterImageCompressCommandChange() {
+	if err := a.persist(); err != nil {
+		a.toast("保存失败：" + err.Error())
+		return
+	}
+	if a.launcher != nil {
+		a.launcher.sourcesChanged()
 	}
 }
 

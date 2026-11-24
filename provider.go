@@ -207,10 +207,10 @@ func (a *app) providerModal(c *ui.Context) {
 				ui.Checkbox(c, &d.Enabled, "保存后启用此服务")
 				ui.Spacer(c)
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					if ghostBtn(c, "取消").Clicked() {
+					if secondaryBtn(c, "取消").Clicked() {
 						a.closeProvider()
 					}
-					if secondaryBtn(c, "保存并测试").Clicked() {
+					if secondaryBtn(c, "保存并测试", btnConfirm).Clicked() {
 						a.saveProvider(true)
 					}
 					if primaryBtn(c, "保存配置").Clicked() {
