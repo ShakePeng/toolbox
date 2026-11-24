@@ -1,0 +1,47 @@
+ai_suppliers.go
+  s_1502393c2203ff::t_ce9e17c719c37e 212-213,390-391,483
+app.go
+  s_1502393c2203ff::t_96ee0bb9836b3a 505,507-511,513,683-684,701,720,727-787,819-821,823-832,835-857
+config.go
+  s_1502393c2203ff::t_54e723e16ebc15 114-119
+file_manager_selection.go
+  s_1502393c2203ff::t_287f39f7cbbce1 1-75
+file_manager_selection_darwin.go
+  s_1502393c2203ff::t_77f34a1346272c 1-68
+file_manager_selection_test.go
+  s_1502393c2203ff::t_cbd1d9507c59a7 1-160
+file_manager_selection_windows.go
+  s_1502393c2203ff::t_12fa3921c55d54 1-67
+home_cards_test.go
+  s_1502393c2203ff::t_02c7c70d697b1d 1-159
+image_compress.go
+  s_1502393c2203ff::t_41b9387364348c 84-119
+image_compress_window.go
+  s_1502393c2203ff::t_36acc1078cb0eb 180-192
+launcher_commands.go
+  s_1502393c2203ff::t_585fc3b9ea0384 52-53
+launcher_commands_test.go
+  s_1502393c2203ff::t_44e5b041b999f2 20-24
+launcher_search.go
+  s_1502393c2203ff::t_eaa104313d4558 36-37
+model.go
+  s_1502393c2203ff::t_2b966af4ed3e28 13,82-85,95
+provider.go
+  s_1502393c2203ff::t_4fca88c95965ab 210,213
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "ba53dc9e211807fc736237fe09a1217f4dbfadc8",
+  "prompts": {},
+  "sessions": {
+    "s_1502393c2203ff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "648f3200-52f5-4a59-a724-8a93a9ece1d5",
+        "model": "unknown"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
