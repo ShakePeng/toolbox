@@ -43,6 +43,12 @@ func TestOverwriteTinyOriginal(t *testing.T) {
 	if err := os.WriteFile(source, original, 0640); err != nil {
 		t.Fatal(err)
 	}
+	// Windows 没有 POSIX 权限位，WriteFile(0640) 落盘就是 0666、Chmod 也只认只读位，
+	// 所以这里比对覆盖前后的实际权限，而不是写死 0640。
+	before, err := os.Stat(source)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := overwriteTinyOriginal(source, imageFormatPNG, compressed); err != nil {
 		t.Fatal(err)
 	}
@@ -51,8 +57,8 @@ func TestOverwriteTinyOriginal(t *testing.T) {
 		t.Fatalf("原图没有被替换：%v", err)
 	}
 	info, _ := os.Stat(source)
-	if info.Mode().Perm() != 0640 {
-		t.Fatalf("覆盖后应保留权限，实际 %v", info.Mode().Perm())
+	if info.Mode().Perm() != before.Mode().Perm() {
+		t.Fatalf("覆盖后应保留权限，覆盖前 %v，实际 %v", before.Mode().Perm(), info.Mode().Perm())
 	}
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != 1 {
