@@ -242,8 +242,9 @@ func TestImageCompressFeatureCardAndCommandSwitch(t *testing.T) {
 	}
 }
 
-// 功能卡片标题旁应外显唤起方式：快捷键 pill、触发词 pill，图片压缩是
-// 可编辑触发词输入框；网页搜索多引擎无单一触发词，不外显。
+// 功能卡片标题旁应外显唤起方式：快捷键 pill、触发词 pill；网页搜索
+// 多引擎无单一触发词，不外显。快捷键文案按平台格式化后比较，
+// 测试在 windows-latest 上也要过（非 macOS 不做符号替换）。
 func TestHomeFeatureTriggerPills(t *testing.T) {
 	a := newTestApp()
 	a.settings.HasCompletedOnboarding = true
@@ -253,7 +254,12 @@ func TestHomeFeatureTriggerPills(t *testing.T) {
 	a.settings.LauncherForkCommand = "fork"
 	tt := ui.NewTester(a.view, 1100, 1500)
 	tt.Frame()
-	for _, text := range []string{"快捷键 ⌥D", "快捷键 F1", "触发词 code", "触发词 trae", "触发词 fork"} {
+	want := []string{
+		"快捷键 " + formatHotkey(a.settings.Hotkeys.Translate),
+		"快捷键 " + formatHotkey(a.settings.Hotkeys.Screenshot),
+		"触发词 code", "触发词 trae", "触发词 fork",
+	}
+	for _, text := range want {
 		if !tt.HasText(text) {
 			t.Errorf("功能中心缺少外显 %q", text)
 		}
